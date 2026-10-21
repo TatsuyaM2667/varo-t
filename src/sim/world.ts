@@ -293,10 +293,13 @@ export class World {
     }
     this.smokes = this.smokes.filter(stepSmoke);
 
-    // 4) rules
+    // 4) rules (may start the next round, which begins at tick 0)
+    const roundBefore = r.index;
     this.stepRules();
-    r.tick++;
-    r.phaseTicks++;
+    if (r.index === roundBefore) {
+      r.tick++;
+      r.phaseTicks++;
+    }
     this.tick++;
   }
 
@@ -555,9 +558,9 @@ export class World {
     return WEAPONS[a.weapon.current];
   }
 
-  /** Hash of all simulation state, for determinism checks. */
+  /** Hash of all round-scoped simulation state, for determinism checks. */
   hash(h = new StateHasher()): number {
-    h.reset().int(this.tick).int(this.round.tick).int(this.round.index).num(this.round.captureProgress);
+    h.reset().int(this.round.tick).int(this.round.index).num(this.round.captureProgress);
     for (const s of this.rng.getState()) h.int(s);
     for (const a of this.agents) {
       h.num(a.x).num(a.y).num(a.z).num(a.vx).num(a.vy).num(a.vz);
