@@ -55,6 +55,8 @@ export interface SpawnPoint {
 
 export interface MapData {
   name: string;
+  /** identity of the layout (renderers rebuild meshes only when it changes) */
+  key: string;
   colliders: Collider[];
   bounds: { minX: number; minZ: number; maxX: number; maxZ: number };
   wallHeight: number;
@@ -173,7 +175,7 @@ export function mergeSolidCells(solid: boolean[][]): CellRect[] {
 }
 
 /** Build the map. `cover` overrides the cover layout (seeded maps); default is the authored one. */
-export function buildMeridianYard(cover: readonly BoxDef[] = COVER_SLOTS): MapData {
+export function buildMeridianYard(cover: readonly BoxDef[] = COVER_SLOTS, key = 'default'): MapData {
   const solid: boolean[][] = [];
   for (let r = 0; r < ROWS; r++) solid.push(new Array<boolean>(COLS).fill(true));
   for (const rect of CARVE) {
@@ -214,6 +216,7 @@ export function buildMeridianYard(cover: readonly BoxDef[] = COVER_SLOTS): MapDa
   const yawSouth = 32768;
   return {
     name: 'Meridian Yard',
+    key,
     colliders,
     bounds: { minX, minZ, maxX, maxZ },
     wallHeight: WALL_H,

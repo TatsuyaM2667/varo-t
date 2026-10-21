@@ -152,7 +152,7 @@ export class World {
     this.rng.reseed(rs);
     if (this.features.seededMap) {
       const layoutRng = new Rng(rs ^ 0x5eed);
-      this.map = buildMeridianYard(generateCoverLayout(layoutRng));
+      this.map = buildMeridianYard(generateCoverLayout(layoutRng), `seed:${rs}`);
       this.bvh = new Bvh(this.map.colliders);
       this.nav = new NavGrid(this.map, this.bvh);
     } else {

@@ -62,3 +62,26 @@ export function applyFeatureOverrides(base: Features, spec: string | null): Feat
   }
   return out;
 }
+
+/**
+ * Non-visual features are cheap, so they are on for every preset by default.
+ * `seededMap` stays opt-in (?f=seededMap) because a changing layout every
+ * round can confuse first-time visitors.
+ */
+export const GAMEPLAY_DEFAULTS: Partial<Features> = {
+  botUtilityAi: true,
+  proceduralAudio: true,
+  spatialReverb: true,
+  killcam: true,
+  roundReplay: true,
+  attractMode: true,
+  destructibles: true,
+  minimap: true,
+  killSlowmo: true,
+};
+
+/** Resolve the active feature set: defaults + preset visuals + URL overrides (`tier0` = all off). */
+export function resolveFeatures(presetFeatures: Partial<Features>, spec: string | null): Features {
+  if (spec && spec.split(',').includes('tier0')) return applyFeatureOverrides({ ...ALL_FEATURES_OFF }, spec.replace('tier0', ''));
+  return applyFeatureOverrides({ ...ALL_FEATURES_OFF, ...GAMEPLAY_DEFAULTS, ...presetFeatures }, spec);
+}
