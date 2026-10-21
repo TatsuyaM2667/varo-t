@@ -61,6 +61,15 @@ export class SmokeViz {
     private volumetric: boolean,
   ) {
     this.tex = cloudTexture(scene);
+    // compile the smoke particle shader up front so the first smoke doesn't hitch
+    const warm = new ParticleSystem('smoke-warmup', 1, scene);
+    warm.particleTexture = this.tex;
+    warm.emitter = new Vector3(0, -50, 0);
+    warm.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    warm.manualEmitCount = 1;
+    warm.minLifeTime = warm.maxLifeTime = 0.5;
+    warm.start();
+    setTimeout(() => warm.dispose(), 3000);
   }
 
   setQuality(particles: number, volumetric: boolean): void {

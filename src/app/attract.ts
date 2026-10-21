@@ -56,7 +56,8 @@ export class AttractMode {
       for (let i = 0; i < 3; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i], difficulty: 'normal' });
     }
     const w = new World({
-      seed: (Date.now() + this.matchCount * 7919) >>> 0,
+      // ?seed=N makes the demo reproducible (performance profiling)
+      seed: ((Number(new URLSearchParams(location.search).get('seed')) || Date.now()) + this.matchCount * 7919) >>> 0,
       roster,
       roundsToWin: 2,
       features: { utilityAi: true, destructibles: this.ctx.features.destructibles, seededMap: false },

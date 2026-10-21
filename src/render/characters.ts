@@ -54,6 +54,7 @@ class AgentVisual {
   private readonly blob: Mesh;
   private phase = 0;
   private flash = 0;
+  private readonly teamColor: Color3;
   private deadT = 0;
   private wasAlive = true;
   /** world-space muzzle point, updated every frame */
@@ -67,6 +68,7 @@ class AgentVisual {
   ) {
     const teamHex = team === 0 ? PALETTE.teams.attackers : PALETTE.teams.defenders;
     const teamCol = Color3.FromHexString(teamHex);
+    this.teamColor = teamCol;
     this.armor = new StandardMaterial(`armor-${id}`, scene);
     this.armor.diffuseColor = Color3.Lerp(teamCol, new Color3(0.85, 0.85, 0.88), 0.55);
     this.armor.specularColor = new Color3(0.25, 0.25, 0.25);
@@ -143,7 +145,7 @@ class AgentVisual {
     if (!show) return;
 
     this.flash = Math.max(0, this.flash - dt * 8);
-    this.armor.emissiveColor.copyFrom(Color3.FromHexString(this.team === 0 ? PALETTE.teams.attackers : PALETTE.teams.defenders).scale(0.12 + this.flash * 1.5));
+    this.teamColor.scaleToRef(0.12 + this.flash * 1.5, this.armor.emissiveColor);
 
     const fx = Math.sin(p.yaw);
     const fz = Math.cos(p.yaw);

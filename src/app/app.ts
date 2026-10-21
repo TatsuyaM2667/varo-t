@@ -36,8 +36,9 @@ export function detectQuality(gfx: EngineHandle): QualityName {
     /* ignore */
   }
   if (/swiftshader|llvmpipe|software/i.test(renderer)) return 'low';
-  if (/intel|uhd|iris|radeon\(tm\) graphics|vega \d|apple|mali|adreno/i.test(renderer)) return 'medium';
-  if (gfx.kind === 'webgpu' && (navigator.hardwareConcurrency ?? 4) >= 8) return 'high';
+  // Only clearly discrete GPUs start on High; integrated ones (Intel UHD/Iris,
+  // Radeon 680M/780M, Apple…) start on Medium, which measured 60 fps on a 680M.
+  if (/nvidia|geforce|rtx|gtx|radeon rx|radeon pro|arc a\d/i.test(renderer)) return 'high';
   return 'medium';
 }
 

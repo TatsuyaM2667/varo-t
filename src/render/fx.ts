@@ -118,6 +118,11 @@ export class Fx {
     this.decalMat.zOffset = -2;
     this.decalMat.backFaceCulling = true;
     this.buildDust(mapBounds, gpuOk);
+    // compile spark shaders now (under the floor) instead of on the first shot
+    for (const ps of this.sparkPools) {
+      ps.emitter = new Vector3(0, -50, 0);
+      ps.manualEmitCount = 1;
+    }
     for (const [k, hex] of Object.entries({ wood: '#9a6a3a', glass: FX_STYLE.glass, crate: '#d98a3d', concrete: '#a39e95' })) {
       const m = new StandardMaterial(`chunk-${k}`, scene);
       m.diffuseColor = Color3.FromHexString(hex);

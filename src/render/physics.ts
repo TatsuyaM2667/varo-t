@@ -1,5 +1,6 @@
 import '@babylonjs/core/Physics/joinedPhysicsEngineComponent';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate';
 import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin';
@@ -31,17 +32,15 @@ export class Physics {
   }
 
   private addStaticWorld(colliders: readonly Collider[]): void {
-    // Only the floor and nearby solid boxes matter for debris; use invisible proxies.
-    void import('@babylonjs/core/Meshes/Builders/boxBuilder').then(({ CreateBox }) => {
-      for (const c of colliders) {
-        if (c.breakHp !== undefined) continue;
-        const m = CreateBox('phys-static', { width: c.maxX - c.minX, height: c.maxY - c.minY, depth: c.maxZ - c.minZ }, this.scene);
-        m.position.set((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2);
-        m.isVisible = false;
-        m.isPickable = false;
-        new PhysicsAggregate(m, PhysicsShapeType.BOX, { mass: 0, friction: 0.8, restitution: 0.1 }, this.scene);
-      }
-    });
+    // Invisible static proxies of the map so debris lands on floors and bounces off walls.
+    for (const c of colliders) {
+      if (c.breakHp !== undefined) continue;
+      const m = CreateBox('phys-static', { width: c.maxX - c.minX, height: c.maxY - c.minY, depth: c.maxZ - c.minZ }, this.scene);
+      m.position.set((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2);
+      m.isVisible = false;
+      m.isPickable = false;
+      new PhysicsAggregate(m, PhysicsShapeType.BOX, { mass: 0, friction: 0.8, restitution: 0.1 }, this.scene);
+    }
   }
 
   addDebris(mesh: Mesh, velocity: Vector3): { dispose(): void } {
