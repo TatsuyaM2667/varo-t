@@ -1,13 +1,11 @@
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import type { Scene } from '@babylonjs/core/scene';
 import { PALETTE } from '../config/visuals';
 import type { Collider, MaterialTag } from '../sim/physics/aabb';
-import { createGridTexture } from './textures';
+import type { SurfaceMaterials } from './materials';
 
-/** Axis-aligned face directions: [normal, u axis, v axis] as axis indices with sign. */
+/** Axis-aligned face directions: [normal, u axis, v axis] as axis indices. */
 const FACES: { n: [number, number, number]; u: 0 | 1 | 2; v: 0 | 1 | 2 }[] = [
   { n: [1, 0, 0], u: 2, v: 1 },
   { n: [-1, 0, 0], u: 2, v: 1 },
@@ -18,8 +16,9 @@ const FACES: { n: [number, number, number]; u: 0 | 1 | 2; v: 0 | 1 | 2 }[] = [
 ];
 
 /**
- * Build vertex data for a set of boxes with world-space UVs, so the grid
- * texture lines up seamlessly across neighbouring boxes.
+ * Vertex data for a set of boxes with world-space UVs, so the grid texture
+ * lines up seamlessly across neighbouring boxes. Bottom faces at y <= 0 are
+ * skipped (never visible).
  */
 export function boxesToVertexData(boxes: readonly Collider[], tileMetres: number): VertexData {
   const positions: number[] = [];
@@ -32,6 +31,7 @@ export function boxesToVertexData(boxes: readonly Collider[], tileMetres: number
     for (const f of FACES) {
       const axis = f.n[0] !== 0 ? 0 : f.n[1] !== 0 ? 1 : 2;
       const sign = f.n[axis];
+      if (axis === 1 && sign < 0 && b.minY <= 0) continue;
       const plane = sign > 0 ? mx[axis] : mn[axis];
       const base = positions.length / 3;
       const corners: [number, number][] = [
@@ -68,29 +68,48 @@ export function boxesToVertexData(boxes: readonly Collider[], tileMetres: number
   return vd;
 }
 
-export function buildGreybox(scene: Scene, colliders: readonly Collider[]): Mesh[] {
+export interface Greybox {
+  /** merged static meshes per material */
+  statics: Mesh[];
+  /** destructible pieces, by collider id */
+  breakables: Map<number, Mesh>;
+  dispose(): void;
+}
+
+export function buildGreybox(scene: Scene, colliders: readonly Collider[], mats: SurfaceMaterials, pbr: boolean): Greybox {
   const groups = new Map<MaterialTag, Collider[]>();
+  const breakables = new Map<number, Mesh>();
   for (const c of colliders) {
+    if (c.breakHp !== undefined) {
+      const m = new Mesh(`break-${c.id}`, scene);
+      boxesToVertexData([c], PALETTE.surfaces[c.material].tileMetres).applyToMesh(m, false);
+      m.material = mats.get(c.material, pbr);
+      m.receiveShadows = true;
+      m.isPickable = false;
+      breakables.set(c.id, m);
+      continue;
+    }
     const list = groups.get(c.material) ?? [];
     list.push(c);
     groups.set(c.material, list);
   }
-  const meshes: Mesh[] = [];
+  const statics: Mesh[] = [];
   for (const [tag, boxes] of groups) {
-    const style = PALETTE.surfaces[tag];
     const mesh = new Mesh(`map-${tag}`, scene);
-    boxesToVertexData(boxes, style.tileMetres).applyToMesh(mesh, false);
-    const mat = new StandardMaterial(`mat-${tag}`, scene);
-    mat.diffuseTexture = createGridTexture(scene, `tex-${tag}`, style.grid);
-    mat.diffuseColor = Color3.White();
-    mat.specularColor = Color3.FromHexString(style.specular);
-    mat.specularPower = 48;
-    mesh.material = mat;
+    boxesToVertexData(boxes, PALETTE.surfaces[tag].tileMetres).applyToMesh(mesh, false);
+    mesh.material = mats.get(tag, pbr);
     mesh.receiveShadows = true;
     mesh.isPickable = false;
     mesh.freezeWorldMatrix();
     mesh.doNotSyncBoundingInfo = true;
-    meshes.push(mesh);
+    statics.push(mesh);
   }
-  return meshes;
+  return {
+    statics,
+    breakables,
+    dispose() {
+      for (const m of statics) m.dispose();
+      for (const m of breakables.values()) m.dispose();
+    },
+  };
 }

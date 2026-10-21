@@ -43,3 +43,51 @@ export const PALETTE: {
   fog: { color: '#e9dcc8', density: 0.004 },
   teams: { attackers: '#ffb648', defenders: '#4fd1ff' },
 };
+
+/** Lighting moods; with the timeOfDay feature each round uses the next one. ★ 時間帯の色はここ */
+export interface LightingMood {
+  name: string;
+  sky: { top: string; horizon: string };
+  sun: { color: string; intensity: number; direction: [number, number, number] };
+  ambient: { sky: string; ground: string; intensity: number };
+  fog: { color: string; density: number };
+  exposure: number;
+}
+
+export const LIGHTING_MOODS: LightingMood[] = [
+  {
+    name: 'noon',
+    sky: PALETTE.sky,
+    sun: PALETTE.sun,
+    ambient: PALETTE.ambient,
+    fog: PALETTE.fog,
+    exposure: 1.0,
+  },
+  {
+    name: 'golden',
+    sky: { top: '#4f6fa8', horizon: '#ffb37a' },
+    sun: { color: '#ffc98a', intensity: 2.6, direction: [0.75, -0.42, 0.5] },
+    ambient: { sky: '#ffd9b8', ground: '#5a4636', intensity: 0.45 },
+    fog: { color: '#f2c39a', density: 0.006 },
+    exposure: 1.05,
+  },
+  {
+    name: 'dusk',
+    sky: { top: '#1f2a52', horizon: '#e0708a' },
+    sun: { color: '#ff9c7a', intensity: 1.8, direction: [-0.8, -0.3, -0.55] },
+    ambient: { sky: '#9fa8ff', ground: '#3a2c3a', intensity: 0.5 },
+    fog: { color: '#7a5a78', density: 0.007 },
+    exposure: 1.15,
+  },
+];
+
+/** Effects colours. */
+export const FX_STYLE = {
+  tracer: '#ffe9a8',
+  muzzle: '#ffd27a',
+  hitSpark: '#ffcf6b',
+  agentHit: { attackers: '#ffb648', defenders: '#4fd1ff' },
+  smoke: '#c9c4d8',
+  smokeShadow: '#6e6a80',
+  glass: '#bfeaff',
+};

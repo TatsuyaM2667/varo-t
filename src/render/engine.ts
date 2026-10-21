@@ -1,3 +1,7 @@
+// Babylon 9 is tree-shaken: engine features used by post-processing (MRT for
+// SSAO), compute-shader particles, render targets etc. must be registered.
+import '@babylonjs/core/Engines/Extensions/index';
+import '@babylonjs/core/Engines/WebGPU/Extensions/index';
 import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import { WebGPUEngine } from '@babylonjs/core/Engines/webgpuEngine';

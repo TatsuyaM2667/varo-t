@@ -21,7 +21,7 @@ export function createGridTexture(scene: Scene, name: string, style: GridStyle, 
     seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
     return seed / 4294967296;
   };
-  for (const res of [8, 32]) {
+  for (const res of [6, 16]) {
     const small = document.createElement('canvas');
     small.width = small.height = res;
     const sctx = small.getContext('2d')!;
@@ -29,7 +29,7 @@ export function createGridTexture(scene: Scene, name: string, style: GridStyle, 
     for (let i = 0; i < img.data.length; i += 4) {
       const v = rnd() < 0.5 ? 0 : 255;
       img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-      img.data[i + 3] = Math.round(rnd() * 255 * style.noise * (res === 8 ? 2.5 : 1.2));
+      img.data[i + 3] = Math.round(rnd() * 255 * style.noise * (res === 6 ? 2.5 : 0.8));
     }
     sctx.putImageData(img, 0, 0);
     ctx.imageSmoothingEnabled = true;
