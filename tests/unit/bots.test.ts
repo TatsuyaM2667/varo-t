@@ -75,3 +75,14 @@ describe('bots', () => {
     expect(a).toEqual(b);
   }, 60_000);
 });
+
+describe('sight-line validation', () => {
+  it('authored layout has usable cover on site and no spawn sight lines', async () => {
+    const { analyseLayout, LOS_LIMITS } = await import('../../src/sim/map/los-check');
+    const r = analyseLayout(buildMeridianYard());
+    expect(r.deathSpotFraction).toBeLessThanOrEqual(LOS_LIMITS.maxDeathSpotFraction);
+    expect(r.longestSightline).toBeLessThanOrEqual(LOS_LIMITS.maxSightline);
+    expect(r.spawnsVisible).toBe(false);
+    expect(r.coversWithoutSafeSpot).toEqual([]);
+  });
+});

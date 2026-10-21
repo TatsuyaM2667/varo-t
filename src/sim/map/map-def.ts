@@ -123,6 +123,10 @@ export const COVER_SLOTS: CoverSlot[] = [
   { x: 24, z: 31, w: 2, d: 2, h: 1.6, material: 'crate', jitter: 1.5, optional: true, zone: 'A Site' },
   { x: -8, z: 22, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 1.5, optional: true, zone: 'A Site' },
   { x: 14.5, z: 22, w: 0.12, d: 3, h: 2.4, material: 'glass', breakHp: 1, jitter: 0, optional: true, zone: 'A Site' },
+  // capture-zone cover around the relay pad (added after LOS validation found the plaza fully exposed)
+  { x: 8, z: 20.2, w: 3, d: 0.6, h: 1.1, material: 'concrete', jitter: 0.5, optional: false, zone: 'A Site' },
+  { x: 3, z: 26.5, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 0.5, optional: false, zone: 'A Site' },
+  { x: 13.2, z: 26, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 0.5, optional: false, zone: 'A Site' },
   // --- Long ---
   { x: -27, z: 6, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 2, optional: false, zone: 'Long' },
   { x: -24.5, z: -14, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 2, optional: false, zone: 'Long' },

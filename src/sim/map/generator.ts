@@ -2,6 +2,7 @@ import { NavGrid } from '../bots/nav';
 import type { Rng } from '../core/rng';
 import { overlaps } from '../physics/aabb';
 import { Bvh } from '../physics/bvh';
+import { LOS_LIMITS, analyseLayout } from './los-check';
 import { type BoxDef, COVER_SLOTS, type MapData, buildMeridianYard } from './map-def';
 
 /**
@@ -10,7 +11,8 @@ import { type BoxDef, COVER_SLOTS, type MapData, buildMeridianYard } from './map
  *  - every spawn can still walk to the relay,
  *  - no spawn-to-spawn line of sight,
  *  - covers don't overlap anything and stay in their zone,
- *  - the site keeps at least 3 head-high-or-crouch covers.
+ *  - the site keeps at least 3 head-high-or-crouch covers,
+ *  - sight lines: few "death spots" on the site, no map-spanning lanes.
  * Falls back to the authored layout if no candidate passes.
  */
 export function generateCoverLayout(rng: Rng, attempts = 24): BoxDef[] {
@@ -23,7 +25,10 @@ export function generateCoverLayout(rng: Rng, attempts = 24): BoxDef[] {
       cand.push({ ...s, x: s.x + jx, z: s.z + jz });
     }
     const map = buildMeridianYard(cand);
-    if (validateLayout(map, cand)) return cand;
+    if (!validateLayout(map, cand)) continue;
+    // sight-line check (~0.2 s) only for candidates that passed the cheap checks
+    const los = analyseLayout(map);
+    if (los.deathSpotFraction <= LOS_LIMITS.maxDeathSpotFraction && los.longestSightline <= LOS_LIMITS.maxSightline && !los.spawnsVisible) return cand;
   }
   return COVER_SLOTS.map((s) => ({ ...s }));
 }
