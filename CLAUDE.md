@@ -5,7 +5,7 @@
 ## 技術スタック
 - TypeScript 7 + Vite 8 + Babylon.js 9（WebGPU 優先、WebGL2 フォールバック）
 - 見た目用物理: Havok（`@babylonjs/havok`）。ゲームプレイの衝突は `src/sim/physics/` の自前決定的コライダー
-- ナビメッシュ: `@babylonjs/addons` の RecastNavigationJSPlugin（ビルド時に焼いて `public/nav/` に置く）
+- ナビゲーション: `src/sim/bots/nav.ts` の決定的グリッド A*（Recast から変更。理由は docs/architecture.md）
 - テスト: Vitest（ロジック）、Playwright（E2E・描画・性能）
 - 配信: Cloudflare Pages（静的）。1ファイル 25 MiB / 20,000 ファイル以下（`npm run check:pages` で検証）
 
@@ -17,7 +17,11 @@
 | ユニットテスト | `npm run test` |
 | E2E | `npm run e2e` |
 | ビルド | `npm run build`（型チェック→Vite→Pages制限チェック） |
-| オフライン配布ZIP | `npm run pack:offline`（P4で追加） |
+| オフライン配布ZIP | `npm run pack:offline` |
+| 自己対戦バランス | `npm run selfplay`（`-- --apply` で難易度を自動調整） |
+| 射線チェック | `npm run validate:map` |
+| 性能計測 | `npm run perf`（実機GPUは `-- --headed`） |
+| デプロイ | `npm run deploy`（wrangler） |
 
 ## アーキテクチャ規約
 - `src/sim/` は **Babylon.js・DOM・`window` に依存しない純TS**。import してよいのは `src/sim/` と `src/config/` のみ。
@@ -43,3 +47,9 @@
 - 外部アセットは CC0 のみ。使ったら `CREDITS.md` に出典とライセンスを記録。手続き的生成を優先。
 - Valorant の名称・キャラ・ロゴ・アセットは使わない。名前は `src/config/brand.ts`。
 - 新しいライブラリは採用理由・バンドルサイズ・代替案を示してから入れる。
+
+## 実装状況（2026-10-22）
+- Tier 0 / Tier 1 / Tier 2 すべて実装済み。各機能は `src/config/features.ts` のフラグで隔離。
+- ボット難易度は `src/config/tuning.generated.ts`（自己対戦の出力）で BASE_BOT_PROFILES に倍率をかけている。
+- 既知の制約: SSAO は WebGL2 のみ（WebGPU では Babylon 9.31 の SSAO2 が描画時に例外）。
+- テスト用フック: `window.__game`（app / gfx / input）。E2E はこれで試合開始・入力有効化を行う。

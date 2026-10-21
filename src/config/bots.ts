@@ -77,7 +77,7 @@ export const BASE_BOT_PROFILES: Record<Difficulty, BotProfile> = {
 
 /**
  * Effective profiles = base × multipliers found by headless self-play
- * (`npm run selfplay -- --apply` writes tuning.generated.ts; delete it to reset).
+ * (`npm run selfplay -- --apply` writes tuning.generated.ts; set the multipliers to 1 to reset).
  */
 export function applyTuning(base: BotProfile, t: { reactionMul: number; aimErrorMul: number } | undefined): BotProfile {
   if (!t) return base;

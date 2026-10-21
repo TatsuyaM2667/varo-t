@@ -4,9 +4,11 @@
 import { chromium } from '@playwright/test';
 const [url, out, stepsJson = '[]'] = process.argv.slice(2);
 const steps = JSON.parse(stepsJson);
+const headed = !!process.env.HEADED;
 const browser = await chromium.launch({
+  headless: !headed,
   executablePath: process.env.CHROME_PATH || undefined,
-  args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', ...(headed ? [] : ['--use-angle=swiftshader']), '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const logs = [];
