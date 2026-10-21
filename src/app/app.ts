@@ -50,6 +50,7 @@ export class App {
   private match: MatchMode | null = null;
   private replay: ReplayViewer | null = null;
   private lastResult: MatchResult | null = null;
+  private submitted = false;
   private screen: HTMLElement | null = null;
   private readonly overlay: HTMLDivElement;
   private readonly fps: HTMLDivElement;
@@ -82,8 +83,10 @@ export class App {
     ui.append(this.fps);
     this.showDebug = params.has('debug');
     const now = performance.now() / 1000;
-    this.idle = new IdleWatchdog(EXHIBIT.idleToTitleSec, () => this.onIdle(), now);
-    this.titleIdle = new IdleWatchdog(EXHIBIT.titleToAttractSec, () => this.enterShowcase(), now);
+    // ?idle=N&attract=N shorten the exhibition timers (for tests / rehearsals)
+    const num = (k: string, d: number): number => (params.has(k) && Number(params.get(k)) > 0 ? Number(params.get(k)) : d);
+    this.idle = new IdleWatchdog(num('idle', EXHIBIT.idleToTitleSec), () => this.onIdle(), now);
+    this.titleIdle = new IdleWatchdog(num('attract', EXHIBIT.titleToAttractSec), () => this.enterShowcase(), now);
 
     const poke = (): void => {
       const n = performance.now() / 1000;
@@ -297,6 +300,7 @@ export class App {
 
   private onMatchEnd(r: MatchResult): void {
     this.lastResult = r;
+    this.submitted = false;
     // let the final banner play for a moment
     setTimeout(() => this.showResults(), 400);
   }
@@ -310,7 +314,8 @@ export class App {
     this.state = 'results';
     this.ensureAttract();
     const score = computeScore(r.summary);
-    const rank = rankFor(loadHighScores(this.kv), score.total);
+    // only offer name entry once per match (the screen is rebuilt after replays)
+    const rank = this.submitted ? -1 : rankFor(loadHighScores(this.kv), score.total);
     this.audio?.ui(r.summary.won ? 'win' : 'lose');
     this.setScreen(
       resultsScreen(r.summary, score, rank, r.history, this.features.roundReplay, {
@@ -318,14 +323,15 @@ export class App {
         title: () => this.goTitle(),
         replay: (round) => this.startReplay(round),
         submitName: (name) => {
-          if (rank >= 0) {
+          if (rank >= 0 && !this.submitted) {
+            this.submitted = true;
             insertHighScore(this.kv, {
               name,
               score: score.total,
               kills: r.summary.stats.kills,
               won: r.summary.won,
               difficulty: r.summary.difficulty,
-              date: new Date().toISOString().slice(0, 10),
+              date: localDate(),
             });
           }
         },
@@ -424,4 +430,9 @@ export class App {
   debugState() {
     return { state: this.state, match: this.match, attract: this.attract, replay: this.replay, quality: this.qualityName, features: this.features };
   }
+}
+
+function localDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

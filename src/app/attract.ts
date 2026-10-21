@@ -26,6 +26,7 @@ export class AttractMode {
   private readonly step = new FixedStep(1 / TICK);
   private readonly cam = new SmoothCam();
   private focus = 0;
+  private lastFocus = -1;
   private focusTimer = 0;
   private time = 0;
   private readonly hud: Hud;
@@ -128,10 +129,25 @@ export class AttractMode {
       const r = 26;
       const s = w.map.relay;
       target = { x: s.x + Math.sin(a) * r, y: 9, z: s.z + Math.cos(a) * r, yaw: a + Math.PI, pitch: -0.28 };
-      this.cam.follow(target, dt, 2);
+      if (this.lastFocus !== -2) this.cam.snap(target);
+      else this.cam.follow(target, dt, 2);
+      this.lastFocus = -2;
     } else {
-      target = shoulderCam(this.view.eye(this.focus, this.step.alpha), w.bvh, 3.2, 0.7, 0.6);
-      this.cam.follow(target, dt, 4);
+      const eye = this.view.eye(this.focus, this.step.alpha);
+      target = shoulderCam(eye, w.bvh, 3.2, 0.7, 0.6);
+      // hard cut when the subject changes or the smoothed camera lost sight of it
+      const p = this.cam.pose;
+      let cut = this.focus !== this.lastFocus || !p;
+      if (p && !cut) {
+        const dx = eye.x - p.x;
+        const dy = eye.y - p.y;
+        const dz = eye.z - p.z;
+        const d = Math.hypot(dx, dy, dz);
+        cut = d > 8 || !!w.bvh.raycast(p.x, p.y, p.z, dx / d, dy / d, dz / d, d);
+      }
+      if (cut) this.cam.snap(target);
+      else this.cam.follow(target, dt, 7);
+      this.lastFocus = this.focus;
     }
     this.view.render(this.step.alpha, this.cam.pose!, -1, dt);
     if (this.showcase && this.bots) {

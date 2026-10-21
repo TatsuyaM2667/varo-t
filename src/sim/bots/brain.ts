@@ -32,8 +32,8 @@ interface Memory {
 
 type Action = 'hold' | 'push' | 'engage' | 'investigate' | 'retake' | 'retreat' | 'capture' | 'rotate' | 'idle';
 
-export function createBrain(self: Agent, difficulty: Difficulty, utility: boolean, rng: Rng): BotBrain {
-  return new Brain(self, BOT_PROFILES[difficulty], utility, rng);
+export function createBrain(self: Agent, difficulty: Difficulty, utility: boolean, rng: Rng, profile?: BotProfile): BotBrain {
+  return new Brain(self, profile ?? BOT_PROFILES[difficulty], utility, rng);
 }
 
 /**

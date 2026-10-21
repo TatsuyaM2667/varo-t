@@ -1,3 +1,5 @@
+import { BOT_TUNING } from './tuning.generated';
+
 /**
  * Bot difficulty. ★ ボットの強さはここ（反応時間・照準誤差・連携度が主な3軸）。
  */
@@ -27,7 +29,8 @@ export interface BotProfile {
   hearingRange: number;
 }
 
-export const BOT_PROFILES: Record<Difficulty, BotProfile> = {
+/** Hand-authored profiles (before self-play tuning). */
+export const BASE_BOT_PROFILES: Record<Difficulty, BotProfile> = {
   easy: {
     reactionMs: 520,
     aimErrorDeg: 5,
@@ -70,6 +73,26 @@ export const BOT_PROFILES: Record<Difficulty, BotProfile> = {
     sightRange: 100,
     hearingRange: 40,
   },
+};
+
+/**
+ * Effective profiles = base × multipliers found by headless self-play
+ * (`npm run selfplay -- --apply` writes tuning.generated.ts; delete it to reset).
+ */
+export function applyTuning(base: BotProfile, t: { reactionMul: number; aimErrorMul: number } | undefined): BotProfile {
+  if (!t) return base;
+  return {
+    ...base,
+    reactionMs: Math.round(base.reactionMs * t.reactionMul),
+    aimErrorDeg: +(base.aimErrorDeg * t.aimErrorMul).toFixed(3),
+    settledErrorDeg: +(base.settledErrorDeg * t.aimErrorMul).toFixed(3),
+  };
+}
+
+export const BOT_PROFILES: Record<Difficulty, BotProfile> = {
+  easy: applyTuning(BASE_BOT_PROFILES.easy, BOT_TUNING.easy),
+  normal: applyTuning(BASE_BOT_PROFILES.normal, BOT_TUNING.normal),
+  hard: applyTuning(BASE_BOT_PROFILES.hard, BOT_TUNING.hard),
 };
 
 /** Exhibition default. */

@@ -1,5 +1,5 @@
 import { ABILITIES } from '../config/abilities';
-import { type Difficulty, DEFAULT_DIFFICULTY } from '../config/bots';
+import { type BotProfile, type Difficulty, DEFAULT_DIFFICULTY } from '../config/bots';
 import { MOVEMENT } from '../config/movement';
 import { RULES } from '../config/rules';
 import { WEAPONS } from '../config/weapons';
@@ -55,6 +55,8 @@ export interface AgentSpec {
   isBot: boolean;
   name: string;
   difficulty?: Difficulty;
+  /** full profile override (self-play tuning) */
+  profile?: BotProfile;
   hpBonus?: number;
 }
 
@@ -209,7 +211,7 @@ export class World {
     for (let i = 0; i < this.agents.length; i++) {
       const a = this.agents[i];
       this.brains[i] = a.isBot
-        ? createBrain(a, (this.roster[i].difficulty ?? DEFAULT_DIFFICULTY) as Difficulty, this.features.utilityAi, new Rng(rs ^ Math.imul(i + 7, 0x2545f491)))
+        ? createBrain(a, (this.roster[i].difficulty ?? DEFAULT_DIFFICULTY) as Difficulty, this.features.utilityAi, new Rng(rs ^ Math.imul(i + 7, 0x2545f491)), this.roster[i].profile)
         : null;
     }
     this.events.push({ type: 'phase', phase: 'prep', round: index });
