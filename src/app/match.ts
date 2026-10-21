@@ -26,6 +26,7 @@ import { InputLog, RoundReplay } from '../sim/replay/input-log';
 import { type AgentSpec, World, type WorldOptions } from '../sim/world';
 import { Hud } from '../ui/hud';
 import { t } from '../ui/i18n';
+import { controlsGridHtml } from '../ui/screens';
 import { SmoothCam, shoulderCam } from './cameras';
 import type { MatchSummary } from './highscore';
 import { WorldView } from './world-view';
@@ -111,7 +112,7 @@ export class MatchMode {
 
     this.pauseEl = document.createElement('div');
     this.pauseEl.className = 'screen dim';
-    this.pauseEl.innerHTML = `<div class="card" style="min-width:360px;text-align:center"><h2>${t('paused')}</h2>
+    this.pauseEl.innerHTML = `<div class="card" style="min-width:360px;text-align:center"><h2>${t('paused')}</h2><div style="text-align:left;margin-bottom:12px">${controlsGridHtml()}</div>
       <div class="menu" style="margin-top:10px"><button class="primary" data-a="resume">${t('clickToResume')}</button><button data-a="quit">${t('backToTitle')}</button></div></div>`;
     this.pauseEl.hidden = true;
     this.pauseEl.addEventListener('click', (ev) => {
@@ -121,11 +122,24 @@ export class MatchMode {
     });
     ctx.ui.append(this.pauseEl);
 
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
     ctx.input.setLook(this.world.agents[0].yaw, 0);
     this.lastYaw = ctx.input.lookYaw;
     this.applyMood(0);
     this.hud.showBanner(`${t('round')} 1`, t('objective'), PALETTE.teams.attackers, 3.5);
   }
+
+  private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (e.code === 'Tab' || e.code === 'F1') {
+      e.preventDefault();
+      this.hud.showControls(true);
+    }
+  };
+
+  private readonly onKeyUp = (e: KeyboardEvent): void => {
+    if (e.code === 'Tab' || e.code === 'F1') this.hud.showControls(false);
+  };
 
   private applyMood(round: number): void {
     const moods = LIGHTING_MOODS;
@@ -408,6 +422,8 @@ export class MatchMode {
   }
 
   dispose(): void {
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
     this.stopKillcam();
     this.hud.dispose();
     this.pauseEl.remove();

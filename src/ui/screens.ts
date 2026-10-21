@@ -64,12 +64,9 @@ export function titleScreen(settings: Settings, scores: readonly HighScore[], h:
 
 const key = (k: string) => `<span class="key">${k}</span>`;
 
-/** The one-page controls card, shown before every match ("クリックして開始"). */
-export function howtoScreen(startable: boolean, onStart: () => void, onBack: () => void): HTMLDivElement {
-  const s = el('div', 'screen dim');
-  s.innerHTML = `<div class="card">
-    <h2>${t('howto')}</h2>
-    <div class="howto-grid">
+/** Key reference grid, shared by the controls card, the pause screen and the in-game overlay. */
+export function controlsGridHtml(): string {
+  return `<div class="howto-grid">
       <div class="key-row">${key('W')}${key('A')}${key('S')}${key('D')} 移動 / Move</div>
       <div class="key-row">${key('マウス')} 視点 / Look</div>
       <div class="key-row">${key('Shift')} 歩き（足音なし）/ Walk</div>
@@ -82,7 +79,15 @@ export function howtoScreen(startable: boolean, onStart: () => void, onBack: () 
       <div class="key-row">${key('1')}${key('2')}${key('3')} ${BRAND.weapons.rifle} / ${BRAND.weapons.sidearm} / ${BRAND.weapons.sniper}</div>
       <div class="key-row">${key('E')} ${BRAND.abilities.dash}: ダッシュ / Dash</div>
       <div class="key-row">${key('Esc')} 一時停止 / Pause</div>
-    </div>
+    </div>`;
+}
+
+/** The one-page controls card, shown before every match ("クリックして開始"). */
+export function howtoScreen(startable: boolean, onStart: () => void, onBack: () => void): HTMLDivElement {
+  const s = el('div', 'screen dim');
+  s.innerHTML = `<div class="card">
+    <h2>${t('howto')}</h2>
+    ${controlsGridHtml()}
     <div class="objective">🎯 ${t('objective')}<br><small style="color:var(--dim)">止まって撃つと当たりやすい・連射は反動で上に跳ねるのでマウスを下に引く</small></div>
     ${startable ? `<div class="howto-start">${t('clickToStart')}</div>` : `<div class="actions"><button data-a="back">${t('close')}</button></div>`}
   </div>`;

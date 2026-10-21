@@ -3,6 +3,7 @@ import { PALETTE } from '../config/visuals';
 import type { WeaponId } from '../config/weapons';
 import type { MapData } from '../sim/map/map-def';
 import { t } from './i18n';
+import { controlsGridHtml } from './screens';
 
 export interface HudModel {
   hp: number;
@@ -79,6 +80,8 @@ export class Hud {
       <div class="smokefog" data-k="fog"></div>
       <div class="hurt" data-k="hurt"></div>
       <div class="banner"></div>
+      <div class="controls-ov" data-k="ctl" hidden><div class="card"><h2>${t('howto')}</h2>${controlsGridHtml()}</div></div>
+      <div class="ctl-hint">Tab / F1 : ${t('howto')}</div>
       <div class="hud-bl">
         <div class="hp"><span data-k="hp">100</span><div class="hp-bar"><i data-k="hpBar"></i></div></div>
         <div class="abil">
@@ -217,6 +220,11 @@ export class Hud {
     this.banner.innerHTML = `<div class="b-title" style="color:${color}">${esc(title)}</div><div class="b-sub">${esc(sub)}</div>`;
     this.banner.classList.add('show');
     this.bannerTimer = seconds;
+  }
+
+  /** Hold Tab / F1 to show the key reference during play. */
+  showControls(v: boolean): void {
+    this.toggle('ctl', v);
   }
 
   setVisible(v: boolean): void {
