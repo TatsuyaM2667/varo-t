@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Rng > produces a known golden sequence (guards against accidental algorithm changes) 1`] = `
+[
+  2837322924,
+  544945897,
+  479756282,
+]
+`;
