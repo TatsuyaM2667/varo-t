@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.zip
+test-results/
+playwright-report/
+.wrangler/
+.DS_Store
