@@ -5,6 +5,8 @@ import { Btn, type InputFrame, has } from '../input-frame';
 import type { Body } from '../physics/body';
 import { bodyOverlaps, moveBody, sweepAxis } from '../physics/body';
 import type { Bvh } from '../physics/bvh';
+import { MAX_HP } from '../../config/weapons';
+import { type WeaponState, createWeaponState } from './weapon';
 
 export type Team = 0 | 1; // 0 = attackers, 1 = defenders
 
@@ -41,6 +43,36 @@ export interface Agent {
   alive: boolean;
   /** true when the agent produced footstep noise this tick */
   noisy: boolean;
+
+  hp: number;
+  maxHp: number;
+  weapon: WeaponState;
+  /** remaining charges / cooldown ticks */
+  smokeCharges: number;
+  smokeCooldown: number;
+  dashCharges: number;
+  dashRecharge: number;
+  /** tick when last damaged, and by whom (for killcam / indicators) */
+  lastHitTick: number;
+  lastAttacker: number;
+  stats: AgentStats;
+  /** metres walked since the last footstep event */
+  stepAccum: number;
+  /** bot difficulty name, '' for humans */
+  difficulty: string;
+}
+
+export interface AgentStats {
+  kills: number;
+  deaths: number;
+  headshots: number;
+  damage: number;
+  shots: number;
+  hits: number;
+}
+
+export function emptyStats(): AgentStats {
+  return { kills: 0, deaths: 0, headshots: 0, damage: 0, shots: 0, hits: 0 };
 }
 
 export function createAgent(id: number, team: Team, isBot: boolean, name: string): Agent {
@@ -67,6 +99,18 @@ export function createAgent(id: number, team: Team, isBot: boolean, name: string
     dashDz: 0,
     alive: true,
     noisy: false,
+    hp: MAX_HP,
+    maxHp: MAX_HP,
+    weapon: createWeaponState(),
+    smokeCharges: 0,
+    smokeCooldown: 0,
+    dashCharges: 0,
+    dashRecharge: 0,
+    lastHitTick: -1,
+    lastAttacker: -1,
+    stats: emptyStats(),
+    stepAccum: 0,
+    difficulty: '',
   };
 }
 
@@ -87,6 +131,8 @@ const COYOTE_TICKS = Math.round(MOVEMENT.coyoteTime * MOVEMENT.tickRate);
 /** Optional modifiers supplied by weapon state (ADS slows you). */
 export interface MoveModifiers {
   speedMul: number;
+  /** prep phase: may look but not move */
+  frozen: boolean;
 }
 
 const body: Body = { x: 0, y: 0, z: 0, radius: MOVEMENT.bodyRadius, height: MOVEMENT.standHeight };
@@ -111,7 +157,8 @@ export function startDash(a: Agent, input: InputFrame): void {
   a.dashTicks = Math.max(1, Math.round(MOVEMENT.dash.duration * MOVEMENT.tickRate));
 }
 
-export function stepAgentMovement(a: Agent, input: InputFrame, world: Bvh, mods: MoveModifiers): void {
+export function stepAgentMovement(a: Agent, inputIn: InputFrame, world: Bvh, mods: MoveModifiers): void {
+  let input = inputIn;
   a.yaw = wrapYaw(input.yaw | 0);
   a.pitch = clamp(input.pitch | 0, -PITCH_LIMIT_UNITS, PITCH_LIMIT_UNITS);
   const pressed = input.buttons & ~a.prevButtons;
@@ -120,6 +167,10 @@ export function stepAgentMovement(a: Agent, input: InputFrame, world: Bvh, mods:
   if (!a.alive) {
     a.vx = a.vy = a.vz = 0;
     return;
+  }
+  if (mods.frozen) {
+    a.vx = a.vz = 0;
+    input = { buttons: input.buttons & Btn.Crouch, yaw: input.yaw, pitch: input.pitch };
   }
 
   // --- crouch ---

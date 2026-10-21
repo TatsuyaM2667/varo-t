@@ -8,11 +8,13 @@ export interface AABB {
 }
 
 /** Surface tag used by gameplay (footstep sound, penetration) and rendering. */
-export type MaterialTag = 'floor' | 'wall' | 'crate' | 'metal' | 'concrete' | 'site';
+export type MaterialTag = 'floor' | 'wall' | 'crate' | 'metal' | 'concrete' | 'site' | 'glass' | 'wood';
 
 export interface Collider extends AABB {
   id: number;
   material: MaterialTag;
+  /** hit points when destructible (Tier 2), undefined = indestructible */
+  breakHp?: number;
 }
 
 export function aabb(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): AABB {

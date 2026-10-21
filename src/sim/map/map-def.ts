@@ -34,6 +34,7 @@ export interface BoxDef {
   y0?: number;
   material: MaterialTag;
   tag?: string;
+  breakHp?: number;
 }
 
 export interface Zone {
@@ -88,34 +89,49 @@ const CARVE: CellRect[] = [
   { c0: 28, c1: 33, r0: 41, r1: 44 },
 ];
 
-const BOXES: BoxDef[] = [
-  // --- A site ---
+/** Fixed structure: platforms, stairs, the relay, spawn barriers. */
+const STRUCTURE: BoxDef[] = [
   { x: -6, z: 33, w: 12, d: 6, h: 1.4, material: 'concrete', tag: 'heaven' },
   // stairs up to heaven: step i spans z ∈ [25 + i, 30]
   ...[1, 2, 3, 4].map((i): BoxDef => ({ x: -2, z: (25 + i + 30) / 2, w: 4, d: 5 - i, h: 0.35 * i, material: 'concrete', tag: 'stairs' })),
   { x: 8, z: 25, w: 6, d: 6, h: 0.3, material: 'site', tag: 'relay-pad' },
   { x: 8, z: 25, w: 0.8, d: 0.8, h: 1.6, y0: 0.3, material: 'metal', tag: 'relay' },
-  { x: 0, z: 19, w: 2, d: 2, h: 2.4, material: 'crate' },
-  { x: 2.1, z: 19, w: 2.2, d: 2, h: 1.1, material: 'crate' },
-  { x: 16, z: 28, w: 2, d: 2, h: 1.2, material: 'crate' },
-  { x: 21, z: 19, w: 2, d: 2, h: 2.4, material: 'crate' },
   { x: 8, z: 33, w: 5, d: 0.6, h: 2.2, material: 'concrete' },
-  { x: 24, z: 31, w: 2, d: 2, h: 1.6, material: 'crate' },
-  { x: -8, z: 22, w: 2, d: 2, h: 1.2, material: 'crate' },
-  // --- Long ---
-  { x: -27, z: 6, w: 2, d: 2, h: 1.2, material: 'crate' },
-  { x: -24.5, z: -14, w: 2, d: 2, h: 2.4, material: 'crate' },
-  { x: -30, z: 20, w: 2, d: 2, h: 1.6, material: 'crate' },
-  // --- Mid ---
-  { x: -3, z: -6, w: 2, d: 2, h: 2.4, material: 'crate' },
-  { x: 3.5, z: 2, w: 2, d: 2, h: 1.2, material: 'crate' },
-  { x: 2, z: -22, w: 2, d: 2, h: 1.2, material: 'crate' },
-  // --- Short ---
-  { x: 29, z: -6, w: 2, d: 2, h: 1.2, material: 'crate' },
-  { x: 23, z: 6, w: 2, d: 2, h: 2.4, material: 'crate' },
-  // --- Attacker spawn barriers ---
   { x: -6, z: -38, w: 3, d: 1, h: 1.2, material: 'concrete' },
   { x: 6, z: -38, w: 3, d: 1, h: 1.2, material: 'concrete' },
+];
+
+/**
+ * Cover slots. `jitter` (m) and `optional` let the seeded generator (Tier 2)
+ * vary the layout per round; the default layout uses them as authored.
+ */
+export interface CoverSlot extends BoxDef {
+  jitter: number;
+  optional: boolean;
+  /** region the jittered box must stay within */
+  zone: string;
+}
+
+export const COVER_SLOTS: CoverSlot[] = [
+  // --- A site ---
+  { x: 0, z: 19, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 1.5, optional: false, zone: 'A Site' },
+  { x: 2.1, z: 19, w: 2.2, d: 2, h: 1.1, material: 'crate', jitter: 0, optional: true, zone: 'A Site' },
+  { x: 16, z: 28, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 2, optional: false, zone: 'A Site' },
+  { x: 21, z: 19, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 2, optional: false, zone: 'A Site' },
+  { x: 24, z: 31, w: 2, d: 2, h: 1.6, material: 'crate', jitter: 1.5, optional: true, zone: 'A Site' },
+  { x: -8, z: 22, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 1.5, optional: true, zone: 'A Site' },
+  { x: 14.5, z: 22, w: 0.12, d: 3, h: 2.4, material: 'glass', breakHp: 1, jitter: 0, optional: true, zone: 'A Site' },
+  // --- Long ---
+  { x: -27, z: 6, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 2, optional: false, zone: 'Long' },
+  { x: -24.5, z: -14, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 2, optional: false, zone: 'Long' },
+  { x: -30, z: 20, w: 2, d: 2, h: 1.6, material: 'crate', jitter: 1, optional: true, zone: 'Long' },
+  // --- Mid ---
+  { x: -3, z: -6, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 1.5, optional: false, zone: 'Mid' },
+  { x: 3.5, z: 2, w: 2, d: 2, h: 1.2, material: 'wood', breakHp: 160, jitter: 1, optional: true, zone: 'Mid' },
+  { x: 2, z: -22, w: 2, d: 2, h: 1.2, material: 'crate', jitter: 2, optional: true, zone: 'Mid' },
+  // --- Short ---
+  { x: 29, z: -6, w: 2, d: 2, h: 1.2, material: 'crate', jitter: 2, optional: false, zone: 'Short' },
+  { x: 23, z: 6, w: 2, d: 2, h: 2.4, material: 'crate', jitter: 1.5, optional: true, zone: 'Short' },
 ];
 
 function cellToWorld(c: number, r: number): { x0: number; x1: number; z0: number; z1: number } {
@@ -156,7 +172,8 @@ export function mergeSolidCells(solid: boolean[][]): CellRect[] {
   return out;
 }
 
-export function buildMeridianYard(): MapData {
+/** Build the map. `cover` overrides the cover layout (seeded maps); default is the authored one. */
+export function buildMeridianYard(cover: readonly BoxDef[] = COVER_SLOTS): MapData {
   const solid: boolean[][] = [];
   for (let r = 0; r < ROWS; r++) solid.push(new Array<boolean>(COLS).fill(true));
   for (const rect of CARVE) {
@@ -175,11 +192,12 @@ export function buildMeridianYard(): MapData {
     const z = rectToZone(rect);
     colliders.push({ id: id++, material: 'wall', minX: z.minX, maxX: z.maxX, minY: 0, maxY: WALL_H, minZ: z.minZ, maxZ: z.maxZ });
   }
-  for (const b of BOXES) {
+  for (const b of [...STRUCTURE, ...cover]) {
     const y0 = b.y0 ?? 0;
     colliders.push({
       id: id++,
       material: b.material,
+      breakHp: b.breakHp,
       minX: b.x - b.w / 2,
       maxX: b.x + b.w / 2,
       minY: y0,

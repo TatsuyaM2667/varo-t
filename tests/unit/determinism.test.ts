@@ -21,9 +21,9 @@ function randomLog(seed: number, ticks: number, agents: number): InputFrame[][] 
 }
 
 function run(log: InputFrame[][]): number[] {
-  const w = new World({ seed: 99 });
-  for (let i = 0; i < log[0].length; i++) w.addAgent({ team: (i % 2) as 0 | 1, isBot: true, name: `a${i}` });
-  w.spawnAll();
+  const roster = log[0].map((_, i) => ({ team: (i % 2) as 0 | 1, isBot: false, name: `a${i}` }));
+  const w = new World({ seed: 99, roster });
+  w.startMatch();
   const hashes: number[] = [];
   for (const row of log) {
     w.step(row);

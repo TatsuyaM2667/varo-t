@@ -33,6 +33,8 @@ export const PALETTE: {
     crate: { grid: { base: '#d98a3d', line: '#c27530', accent: '#8a4f1d', divisions: 2, noise: 0.06 }, tileMetres: 2, specular: '#2a2a2a' },
     metal: { grid: { base: '#8fb3c9', line: '#7a9db3', accent: '#e8f6ff', divisions: 2, noise: 0.03 }, tileMetres: 1, specular: '#aaaaaa' },
     concrete: { grid: { base: '#a39e95', line: '#948f86', accent: '#857f75', divisions: 4, noise: 0.05 }, tileMetres: 4, specular: '#151515' },
+    glass: { grid: { base: '#a8e4ff', line: '#c9f0ff', accent: '#ffffff', divisions: 1, noise: 0.0 }, tileMetres: 3, specular: '#ffffff' },
+    wood: { grid: { base: '#a0703f', line: '#8a5d32', accent: '#5e3c1c', divisions: 4, noise: 0.08 }, tileMetres: 1.2, specular: '#202020' },
     site: { grid: { base: '#2f7f7a', line: '#3f9a94', accent: '#9ef0e6', divisions: 3, noise: 0.03 }, tileMetres: 6, specular: '#333333' },
   },
   sky: { top: '#5d8fc9', horizon: '#f2d7b0' },

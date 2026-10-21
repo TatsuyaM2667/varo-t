@@ -28,7 +28,7 @@ describe('module boundaries', () => {
   });
 
   it('src/sim uses no non-deterministic or host APIs', () => {
-    const banned = [/Math\.random/, /Math\.(sin|cos|tan|atan2?|asin|acos|exp|log|pow)\(/, /\bDate\.now/, /performance\.now/, /\bwindow\./, /\bdocument\./];
+    const banned = [/Math\.random/, /Math\.(sin|cos|tan|atan2?|asin|acos|exp|log|pow|hypot|cbrt)\(/, /\bDate\.now/, /performance\.now/, /\bwindow\./, /\bdocument\./];
     for (const f of files) {
       const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
       for (const re of banned) expect(re.test(src), `${relative(ROOT, f)} matches ${re}`).toBe(false);

@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { MOVEMENT } from '../../src/config/movement';
 import { horizontalSpeed } from '../../src/sim/entities/agent';
 import { Btn, type InputFrame } from '../../src/sim/input-frame';
-import { World } from '../../src/sim/world';
+import { liveWorld } from './helpers';
 
 function setup() {
-  const w = new World({ seed: 1 });
-  const a = w.addAgent({ team: 0, isBot: false, name: 'p' });
-  w.spawnAll();
+  const w = liveWorld();
+  const a = w.agents[0];
   return { w, a };
 }
 

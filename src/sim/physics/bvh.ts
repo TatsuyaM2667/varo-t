@@ -13,6 +13,8 @@ export class Bvh {
   private readonly count: Int32Array; // leaf: item count
   private readonly order: Int32Array;
   private nodeCount = 0;
+  /** colliders removed at runtime (destroyed cover), indexed by collider id */
+  readonly disabled: Uint8Array;
 
   constructor(readonly items: readonly Collider[], private readonly leafSize = 4) {
     const maxNodes = Math.max(1, items.length * 2);
@@ -22,6 +24,9 @@ export class Bvh {
     this.start = new Int32Array(maxNodes);
     this.count = new Int32Array(maxNodes);
     this.order = new Int32Array(items.length);
+    let maxId = 0;
+    for (const it of items) maxId = Math.max(maxId, it.id);
+    this.disabled = new Uint8Array(maxId + 1);
     for (let i = 0; i < items.length; i++) this.order[i] = i;
     if (items.length > 0) this.build(0, items.length);
     else this.nodeCount = 0;
@@ -84,6 +89,7 @@ export class Bvh {
         const s = this.start[node];
         for (let i = 0; i < this.count[node]; i++) {
           const it = this.items[this.order[s + i]];
+          if (this.disabled[it.id]) continue;
           if (q.maxX >= it.minX && q.minX <= it.maxX && q.maxY >= it.minY && q.minY <= it.maxY && q.maxZ >= it.minZ && q.minZ <= it.maxZ) {
             out.push(it);
           }
@@ -132,6 +138,7 @@ export class Bvh {
         const s = this.start[node];
         for (let i = 0; i < this.count[node]; i++) {
           const it = this.items[this.order[s + i]];
+          if (this.disabled[it.id]) continue;
           if (filter && !filter(it)) continue;
           const t = rayAABB(ox, oy, oz, idx, idy, idz, it, bestT);
           if (t >= 0 && (t < bestT || (t === bestT && best !== null && it.id < best.id))) {

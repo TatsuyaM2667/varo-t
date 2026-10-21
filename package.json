@@ -17,6 +17,7 @@
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
     "@webgpu/types": "^0.1.74",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
