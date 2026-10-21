@@ -1,0 +1,31 @@
+[hidden] { display: none !important; }
+:root {
+  --fg: #f4f1ea;
+  --dim: rgba(244, 241, 234, 0.6);
+  --accent: #4fd1ff;
+  --warn: #ffb648;
+  --bg: rgba(10, 14, 20, 0.72);
+  font-family: 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0e14; color: var(--fg); user-select: none; }
+#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+#ui { position: fixed; inset: 0; pointer-events: none; }
+#ui .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; background: radial-gradient(ellipse at center, rgba(10,14,20,0.55), rgba(10,14,20,0.9)); }
+#ui .title { font-size: clamp(40px, 7vw, 96px); font-weight: 800; letter-spacing: 0.18em; margin: 0; }
+#ui .title span { color: var(--accent); }
+#ui .sub { color: var(--dim); letter-spacing: 0.3em; margin-top: 8px; }
+#ui .prompt { margin-top: 48px; font-size: 22px; letter-spacing: 0.2em; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+#ui .crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+#ui .crosshair i { position: absolute; background: #9dff6a; box-shadow: 0 0 0 1px rgba(0,0,0,0.6); }
+#ui .crosshair .h { width: 6px; height: 2px; top: -1px; }
+#ui .crosshair .h.l { left: -10px; }
+#ui .crosshair .h.r { left: 4px; }
+#ui .crosshair .v { width: 2px; height: 6px; left: -1px; }
+#ui .crosshair .v.t { top: -10px; }
+#ui .crosshair .v.b { top: 4px; }
+#ui .crosshair .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
+#ui .debug { position: absolute; left: 8px; top: 8px; font: 12px/1.4 ui-monospace, monospace; background: var(--bg); padding: 6px 8px; border-radius: 4px; white-space: pre; }
+#ui .callout { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); font-size: 14px; letter-spacing: 0.25em; color: var(--dim); text-transform: uppercase; }
+#ui .crash { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(10,14,20,0.9); font-size: 20px; pointer-events: auto; }
