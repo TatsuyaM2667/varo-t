@@ -1,18 +1,26 @@
-import '@babylonjs/core/Materials/fresnelParameters';
-import { FresnelParameters } from '@babylonjs/core/Materials/fresnelParameters';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import type { Color3 } from '@babylonjs/core/Maths/math.color';
-import { Color3 as C3 } from '@babylonjs/core/Maths/math.color';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
-import type { Mesh } from '@babylonjs/core/Meshes/mesh';
-import type { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
-import type { Scene } from '@babylonjs/core/scene';
-import { CHARACTER_LOOK, type HelmetStyle, SKINS, type Skin } from '../config/skins';
-import type { WeaponId } from '../config/weapons';
-import type { Bvh } from '../sim/physics/bvh';
-import { type V3, solveTwoBone } from './ik';
-import { type Piece, buildPart, c3, detailTexture } from './kit';
+import "@babylonjs/core/Materials/fresnelParameters";
+import { FresnelParameters } from "@babylonjs/core/Materials/fresnelParameters";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import type { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Color3 as C3 } from "@babylonjs/core/Maths/math.color";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Bone } from "@babylonjs/core/Bones/bone";
+import { Skeleton } from "@babylonjs/core/Bones/skeleton";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
+import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import type { Scene } from "@babylonjs/core/scene";
+import {
+  CHARACTER_LOOK,
+  type HelmetStyle,
+  SKINS,
+  type Skin,
+} from "../config/skins";
+import type { WeaponId } from "../config/weapons";
+import type { Bvh } from "../sim/physics/bvh";
+import { type V3, solveTwoBone } from "./ik";
+import { type Piece, buildPart, c3, detailTexture } from "./kit";
 
 /** Interpolated pose of one agent for this render frame. */
 export interface AgentPose {
@@ -52,171 +60,481 @@ function palette(skin: Skin, variant: number): Palette {
   const v = (variant % 3) - 1;
   const k = CHARACTER_LOOK.shadeVariation * v;
   const shade = (c: Color3): Color3 => c.scale(1 + k);
-  return { suit: c3(skin.suit), armor: shade(c3(skin.armor)), gear: shade(c3(skin.gear)), dark: c3(skin.dark), glow: c3(skin.glow) };
+  return {
+    suit: c3(skin.suit),
+    armor: shade(c3(skin.armor)),
+    gear: shade(c3(skin.gear)),
+    dark: c3(skin.dark),
+    glow: c3(skin.glow),
+  };
 }
 
 // ------------------------------------------------------------- geometry
 
 function pelvisPieces(p: Palette): Piece[] {
   return [
-    { shape: 'box', size: [0.34, 0.2, 0.22], color: p.suit },
-    { shape: 'box', size: [0.37, 0.06, 0.25], pos: [0, 0.07, 0], color: p.dark }, // belt
-    { shape: 'box', size: [0.09, 0.1, 0.08], pos: [0.14, 0.02, 0.12], color: p.gear }, // pouches
-    { shape: 'box', size: [0.09, 0.1, 0.08], pos: [-0.14, 0.02, 0.12], color: p.gear },
-    { shape: 'box', size: [0.08, 0.16, 0.12], pos: [0.2, -0.06, 0], color: p.gear }, // holster
+    { shape: "box", size: [0.34, 0.2, 0.22], color: p.suit },
+    {
+      shape: "box",
+      size: [0.37, 0.06, 0.25],
+      pos: [0, 0.07, 0],
+      color: p.dark,
+    }, // belt
+    {
+      shape: "box",
+      size: [0.09, 0.1, 0.08],
+      pos: [0.14, 0.02, 0.12],
+      color: p.gear,
+    }, // pouches
+    {
+      shape: "box",
+      size: [0.09, 0.1, 0.08],
+      pos: [-0.14, 0.02, 0.12],
+      color: p.gear,
+    },
+    {
+      shape: "box",
+      size: [0.08, 0.16, 0.12],
+      pos: [0.2, -0.06, 0],
+      color: p.gear,
+    }, // holster
   ];
 }
 
 function torsoPieces(p: Palette): Piece[] {
   return [
-    { shape: 'box', size: [0.32, 0.22, 0.2], pos: [0, 0.11, 0], color: p.suit }, // abdomen
-    { shape: 'box', size: [0.44, 0.3, 0.25], pos: [0, 0.37, 0], color: p.suit }, // chest
-    { shape: 'box', size: [0.4, 0.27, 0.06], pos: [0, 0.37, 0.13], color: p.armor }, // chest plate
-    { shape: 'box', size: [0.3, 0.12, 0.05], pos: [0, 0.18, 0.12], color: p.armor }, // ab plate
-    { shape: 'box', size: [0.38, 0.26, 0.05], pos: [0, 0.37, -0.13], color: p.armor }, // back plate
-    { shape: 'box', size: [0.08, 0.1, 0.06], pos: [0.12, 0.3, 0.17], color: p.gear }, // mag pouches
-    { shape: 'box', size: [0.08, 0.1, 0.06], pos: [0, 0.3, 0.17], color: p.gear },
-    { shape: 'box', size: [0.08, 0.1, 0.06], pos: [-0.12, 0.3, 0.17], color: p.gear },
-    { shape: 'cyl', size: [0.16, 0.08, 0.2], pos: [0, 0.52, 0], rot: [Math.PI / 2, 0, 0], color: p.armor }, // collar
-    { shape: 'box', size: [0.3, 0.32, 0.13], pos: [0, 0.35, -0.22], color: p.gear }, // backpack
-    { shape: 'box', size: [0.32, 0.08, 0.15], pos: [0, 0.2, -0.22], color: p.dark },
-    { shape: 'cyl', size: [0.015, 0.34, 0.02], pos: [0.11, 0.62, -0.25], rot: [-Math.PI / 2, 0, 0], color: p.dark }, // antenna
+    { shape: "box", size: [0.32, 0.22, 0.2], pos: [0, 0.11, 0], color: p.suit }, // abdomen
+    { shape: "box", size: [0.44, 0.3, 0.25], pos: [0, 0.37, 0], color: p.suit }, // chest
+    {
+      shape: "box",
+      size: [0.4, 0.27, 0.06],
+      pos: [0, 0.37, 0.13],
+      color: p.armor,
+    }, // chest plate
+    {
+      shape: "box",
+      size: [0.3, 0.12, 0.05],
+      pos: [0, 0.18, 0.12],
+      color: p.armor,
+    }, // ab plate
+    {
+      shape: "box",
+      size: [0.38, 0.26, 0.05],
+      pos: [0, 0.37, -0.13],
+      color: p.armor,
+    }, // back plate
+    {
+      shape: "box",
+      size: [0.08, 0.1, 0.06],
+      pos: [0.12, 0.3, 0.17],
+      color: p.gear,
+    }, // mag pouches
+    {
+      shape: "box",
+      size: [0.08, 0.1, 0.06],
+      pos: [0, 0.3, 0.17],
+      color: p.gear,
+    },
+    {
+      shape: "box",
+      size: [0.08, 0.1, 0.06],
+      pos: [-0.12, 0.3, 0.17],
+      color: p.gear,
+    },
+    {
+      shape: "cyl",
+      size: [0.16, 0.08, 0.2],
+      pos: [0, 0.52, 0],
+      rot: [Math.PI / 2, 0, 0],
+      color: p.armor,
+    }, // collar
+    {
+      shape: "box",
+      size: [0.3, 0.32, 0.13],
+      pos: [0, 0.35, -0.22],
+      color: p.gear,
+    }, // backpack
+    {
+      shape: "box",
+      size: [0.32, 0.08, 0.15],
+      pos: [0, 0.2, -0.22],
+      color: p.dark,
+    },
+    {
+      shape: "cyl",
+      size: [0.015, 0.34, 0.02],
+      pos: [0.11, 0.62, -0.25],
+      rot: [-Math.PI / 2, 0, 0],
+      color: p.dark,
+    }, // antenna
   ];
 }
 
 function torsoGlow(p: Palette): Piece[] {
   return [
-    { shape: 'box', size: [0.2, 0.025, 0.012], pos: [0, 0.45, 0.165], color: p.glow },
-    { shape: 'box', size: [0.025, 0.2, 0.012], pos: [0.1, 0.35, -0.29], color: p.glow },
-    { shape: 'box', size: [0.025, 0.2, 0.012], pos: [-0.1, 0.35, -0.29], color: p.glow },
+    {
+      shape: "box",
+      size: [0.2, 0.025, 0.012],
+      pos: [0, 0.45, 0.165],
+      color: p.glow,
+    },
+    {
+      shape: "box",
+      size: [0.025, 0.2, 0.012],
+      pos: [0.1, 0.35, -0.29],
+      color: p.glow,
+    },
+    {
+      shape: "box",
+      size: [0.025, 0.2, 0.012],
+      pos: [-0.1, 0.35, -0.29],
+      color: p.glow,
+    },
   ];
 }
 
 function headPieces(p: Palette, style: HelmetStyle): Piece[] {
-  const neck: Piece = { shape: 'cyl', size: [0.11, 0.1, 0.12], pos: [0, 0.03, 0], rot: [Math.PI / 2, 0, 0], color: p.suit };
-  if (style === 'hood') {
+  const neck: Piece = {
+    shape: "cyl",
+    size: [0.11, 0.1, 0.12],
+    pos: [0, 0.03, 0],
+    rot: [Math.PI / 2, 0, 0],
+    color: p.suit,
+  };
+  if (style === "hood") {
     return [
       neck,
-      { shape: 'sphere', size: [0.32, 0.33, 0.33], pos: [0, 0.16, -0.015], color: p.suit }, // hood
-      { shape: 'sphere', size: [0.25, 0.27, 0.27], pos: [0, 0.15, 0.02], color: p.dark }, // face
-      { shape: 'box', size: [0.2, 0.09, 0.08], pos: [0, 0.09, 0.12], color: p.gear }, // mask
-      { shape: 'box', size: [0.34, 0.07, 0.3], pos: [0, 0.04, -0.02], color: p.gear }, // scarf
+      {
+        shape: "sphere",
+        size: [0.32, 0.33, 0.33],
+        pos: [0, 0.16, -0.015],
+        color: p.suit,
+      }, // hood
+      {
+        shape: "sphere",
+        size: [0.25, 0.27, 0.27],
+        pos: [0, 0.15, 0.02],
+        color: p.dark,
+      }, // face
+      {
+        shape: "box",
+        size: [0.2, 0.09, 0.08],
+        pos: [0, 0.09, 0.12],
+        color: p.gear,
+      }, // mask
+      {
+        shape: "box",
+        size: [0.34, 0.07, 0.3],
+        pos: [0, 0.04, -0.02],
+        color: p.gear,
+      }, // scarf
     ];
   }
   const pieces: Piece[] = [
     neck,
-    { shape: 'sphere', size: [0.25, 0.26, 0.26], pos: [0, 0.14, 0], color: p.dark }, // head
-    { shape: 'sphere', size: [0.29, 0.25, 0.3], pos: [0, 0.19, -0.01], color: p.armor }, // helmet shell
-    { shape: 'box', size: [0.05, 0.1, 0.12], pos: [0.14, 0.13, 0], color: p.gear }, // ear pieces
-    { shape: 'box', size: [0.05, 0.1, 0.12], pos: [-0.14, 0.13, 0], color: p.gear },
+    {
+      shape: "sphere",
+      size: [0.25, 0.26, 0.26],
+      pos: [0, 0.14, 0],
+      color: p.dark,
+    }, // head
+    {
+      shape: "sphere",
+      size: [0.29, 0.25, 0.3],
+      pos: [0, 0.19, -0.01],
+      color: p.armor,
+    }, // helmet shell
+    {
+      shape: "box",
+      size: [0.05, 0.1, 0.12],
+      pos: [0.14, 0.13, 0],
+      color: p.gear,
+    }, // ear pieces
+    {
+      shape: "box",
+      size: [0.05, 0.1, 0.12],
+      pos: [-0.14, 0.13, 0],
+      color: p.gear,
+    },
   ];
-  if (style === 'crest') {
-    pieces.push({ shape: 'box', size: [0.05, 0.06, 0.26], pos: [0, 0.32, -0.01], color: p.gear });
-    pieces.push({ shape: 'cyl', size: [0.012, 0.2, 0.016], pos: [-0.15, 0.27, -0.06], rot: [-Math.PI / 2.4, 0, 0], color: p.dark });
+  if (style === "crest") {
+    pieces.push({
+      shape: "box",
+      size: [0.05, 0.06, 0.26],
+      pos: [0, 0.32, -0.01],
+      color: p.gear,
+    });
+    pieces.push({
+      shape: "cyl",
+      size: [0.012, 0.2, 0.016],
+      pos: [-0.15, 0.27, -0.06],
+      rot: [-Math.PI / 2.4, 0, 0],
+      color: p.dark,
+    });
   }
   return pieces;
 }
 
 function headGlow(p: Palette, style: HelmetStyle): Piece[] {
-  if (style === 'hood') {
+  if (style === "hood") {
     return [
-      { shape: 'box', size: [0.05, 0.018, 0.02], pos: [0.045, 0.17, 0.13], color: p.glow },
-      { shape: 'box', size: [0.05, 0.018, 0.02], pos: [-0.045, 0.17, 0.13], color: p.glow },
+      {
+        shape: "box",
+        size: [0.05, 0.018, 0.02],
+        pos: [0.045, 0.17, 0.13],
+        color: p.glow,
+      },
+      {
+        shape: "box",
+        size: [0.05, 0.018, 0.02],
+        pos: [-0.045, 0.17, 0.13],
+        color: p.glow,
+      },
     ];
   }
-  return [{ shape: 'box', size: [0.21, 0.055, 0.04], pos: [0, 0.15, 0.125], color: p.glow }];
+  return [
+    {
+      shape: "box",
+      size: [0.21, 0.055, 0.04],
+      pos: [0, 0.15, 0.125],
+      color: p.glow,
+    },
+  ];
 }
 
 /** Limbs are authored along +Z from the parent joint with their exact bone length. */
 function thighPieces(p: Palette): Piece[] {
   return [
-    { shape: 'capsule', size: [0.085, THIGH + 0.1], pos: [0, 0, THIGH / 2], color: p.suit },
-    { shape: 'cyl', size: [0.2, 0.16, 0.19], pos: [0, 0, 0.14], color: p.gear }, // thigh rig
-    { shape: 'sphere', size: [0.13, 0.13, 0.11], pos: [0, 0, THIGH], color: p.armor }, // knee pad
+    {
+      shape: "capsule",
+      size: [0.085, THIGH + 0.1],
+      pos: [0, 0, THIGH / 2],
+      color: p.suit,
+    },
+    { shape: "cyl", size: [0.2, 0.16, 0.19], pos: [0, 0, 0.14], color: p.gear }, // thigh rig
+    {
+      shape: "sphere",
+      size: [0.13, 0.13, 0.11],
+      pos: [0, 0, THIGH],
+      color: p.armor,
+    }, // knee pad
   ];
 }
 
 function shinPieces(p: Palette): Piece[] {
   return [
-    { shape: 'capsule', size: [0.07, SHIN + 0.06], pos: [0, 0, SHIN / 2], color: p.suit },
-    { shape: 'cyl', size: [0.16, 0.18, 0.15], pos: [0, 0, 0.15], color: p.armor }, // shin guard
-    { shape: 'cyl', size: [0.15, 0.17, 0.17], pos: [0, 0, SHIN - 0.08], color: p.dark }, // boot shaft
+    {
+      shape: "capsule",
+      size: [0.07, SHIN + 0.06],
+      pos: [0, 0, SHIN / 2],
+      color: p.suit,
+    },
+    {
+      shape: "cyl",
+      size: [0.16, 0.18, 0.15],
+      pos: [0, 0, 0.15],
+      color: p.armor,
+    }, // shin guard
+    {
+      shape: "cyl",
+      size: [0.15, 0.17, 0.17],
+      pos: [0, 0, SHIN - 0.08],
+      color: p.dark,
+    }, // boot shaft
   ];
 }
 
 function footPieces(p: Palette): Piece[] {
   return [
-    { shape: 'box', size: [0.13, 0.09, 0.27], pos: [0, -0.01, 0.05], color: p.dark },
-    { shape: 'box', size: [0.135, 0.03, 0.28], pos: [0, -0.05, 0.05], color: p.gear }, // sole
+    {
+      shape: "box",
+      size: [0.13, 0.09, 0.27],
+      pos: [0, -0.01, 0.05],
+      color: p.dark,
+    },
+    {
+      shape: "box",
+      size: [0.135, 0.03, 0.28],
+      pos: [0, -0.05, 0.05],
+      color: p.gear,
+    }, // sole
   ];
 }
 
 function upperArmPieces(p: Palette): Piece[] {
   return [
-    { shape: 'capsule', size: [0.065, UPPER_ARM + 0.08], pos: [0, 0, UPPER_ARM / 2], color: p.suit },
-    { shape: 'sphere', size: [0.2, 0.17, 0.2], pos: [0, 0, 0.03], color: p.armor }, // shoulder pad
+    {
+      shape: "capsule",
+      size: [0.065, UPPER_ARM + 0.08],
+      pos: [0, 0, UPPER_ARM / 2],
+      color: p.suit,
+    },
+    {
+      shape: "sphere",
+      size: [0.2, 0.17, 0.2],
+      pos: [0, 0, 0.03],
+      color: p.armor,
+    }, // shoulder pad
   ];
 }
 
 function forearmPieces(p: Palette): Piece[] {
   return [
-    { shape: 'capsule', size: [0.055, FOREARM + 0.05], pos: [0, 0, FOREARM / 2], color: p.suit },
-    { shape: 'cyl', size: [0.13, 0.14, 0.12], pos: [0, 0, 0.15], color: p.armor }, // bracer
-    { shape: 'sphere', size: [0.1, 0.09, 0.12], pos: [0, 0, FOREARM], color: p.dark }, // glove
+    {
+      shape: "capsule",
+      size: [0.055, FOREARM + 0.05],
+      pos: [0, 0, FOREARM / 2],
+      color: p.suit,
+    },
+    {
+      shape: "cyl",
+      size: [0.13, 0.14, 0.12],
+      pos: [0, 0, 0.15],
+      color: p.armor,
+    }, // bracer
+    {
+      shape: "sphere",
+      size: [0.1, 0.09, 0.12],
+      pos: [0, 0, FOREARM],
+      color: p.dark,
+    }, // glove
   ];
-}
-
-function forearmGlow(p: Palette): Piece[] {
-  return [{ shape: 'cyl', size: [0.135, 0.02, 0.135], pos: [0, 0, 0.1], color: p.glow }];
 }
 
 /** Third-person guns, origin at the grip, barrel along +Z. */
 function gunPieces(p: Palette, w: WeaponId): Piece[] {
-  const metal = c3('#22252b');
-  const poly = c3('#3b3f47');
-  if (w === 'sidearm') {
+  const metal = c3("#22252b");
+  const poly = c3("#3b3f47");
+  if (w === "sidearm") {
     return [
-      { shape: 'box', size: [0.04, 0.05, 0.2], pos: [0, 0.03, 0.08], color: metal },
-      { shape: 'box', size: [0.035, 0.11, 0.05], pos: [0, -0.03, 0], color: poly },
+      {
+        shape: "box",
+        size: [0.04, 0.05, 0.2],
+        pos: [0, 0.03, 0.08],
+        color: metal,
+      },
+      {
+        shape: "box",
+        size: [0.035, 0.11, 0.05],
+        pos: [0, -0.03, 0],
+        color: poly,
+      },
     ];
   }
-  if (w === 'sniper') {
+  if (w === "sniper") {
     return [
-      { shape: 'box', size: [0.06, 0.08, 0.5], pos: [0, 0, 0.12], color: metal },
-      { shape: 'cyl', size: [0.03, 0.55, 0.03], pos: [0, 0.01, 0.62], color: metal },
-      { shape: 'cyl', size: [0.06, 0.3, 0.06], pos: [0, 0.08, 0.12], color: metal }, // scope
-      { shape: 'box', size: [0.05, 0.09, 0.26], pos: [0, -0.02, -0.25], color: p.gear }, // stock
-      { shape: 'box', size: [0.04, 0.1, 0.05], pos: [0, -0.07, 0.02], color: poly },
+      {
+        shape: "box",
+        size: [0.06, 0.08, 0.5],
+        pos: [0, 0, 0.12],
+        color: metal,
+      },
+      {
+        shape: "cyl",
+        size: [0.03, 0.55, 0.03],
+        pos: [0, 0.01, 0.62],
+        color: metal,
+      },
+      {
+        shape: "cyl",
+        size: [0.06, 0.3, 0.06],
+        pos: [0, 0.08, 0.12],
+        color: metal,
+      }, // scope
+      {
+        shape: "box",
+        size: [0.05, 0.09, 0.26],
+        pos: [0, -0.02, -0.25],
+        color: p.gear,
+      }, // stock
+      {
+        shape: "box",
+        size: [0.04, 0.1, 0.05],
+        pos: [0, -0.07, 0.02],
+        color: poly,
+      },
     ];
   }
   return [
-    { shape: 'box', size: [0.06, 0.09, 0.42], pos: [0, 0, 0.12], color: metal }, // receiver
-    { shape: 'cyl', size: [0.028, 0.28, 0.028], pos: [0, 0.01, 0.46], color: metal },
-    { shape: 'box', size: [0.07, 0.07, 0.2], pos: [0, 0, 0.36], color: p.gear }, // handguard
-    { shape: 'box', size: [0.045, 0.14, 0.07], pos: [0, -0.1, 0.16], color: poly }, // mag
-    { shape: 'box', size: [0.05, 0.08, 0.22], pos: [0, -0.01, -0.2], color: poly }, // stock
-    { shape: 'box', size: [0.035, 0.035, 0.06], pos: [0, 0.07, 0.06], color: metal }, // sight
+    { shape: "box", size: [0.06, 0.09, 0.42], pos: [0, 0, 0.12], color: metal }, // receiver
+    {
+      shape: "cyl",
+      size: [0.028, 0.28, 0.028],
+      pos: [0, 0.01, 0.46],
+      color: metal,
+    },
+    { shape: "box", size: [0.07, 0.07, 0.2], pos: [0, 0, 0.36], color: p.gear }, // handguard
+    {
+      shape: "box",
+      size: [0.045, 0.14, 0.07],
+      pos: [0, -0.1, 0.16],
+      color: poly,
+    }, // mag
+    {
+      shape: "box",
+      size: [0.05, 0.08, 0.22],
+      pos: [0, -0.01, -0.2],
+      color: poly,
+    }, // stock
+    {
+      shape: "box",
+      size: [0.035, 0.035, 0.06],
+      pos: [0, 0.07, 0.06],
+      color: metal,
+    }, // sight
   ];
 }
 
 function gunGlow(p: Palette, w: WeaponId): Piece[] {
-  const len = w === 'sniper' ? 0.4 : w === 'sidearm' ? 0.12 : 0.3;
-  return [{ shape: 'box', size: [0.062, 0.012, len], pos: [0, 0.045, 0.12], color: p.glow }];
+  const len = w === "sniper" ? 0.4 : w === "sidearm" ? 0.12 : 0.3;
+  return [
+    {
+      shape: "box",
+      size: [0.062, 0.012, len],
+      pos: [0, 0.045, 0.12],
+      color: p.glow,
+    },
+  ];
 }
 
 // --------------------------------------------------------------- visual
 
+/** Bone order of the skinned body (one bone per rigid part). */
+const BONE = {
+  pelvis: 0,
+  torso: 1,
+  head: 2,
+  thigh: [3, 6],
+  shin: [4, 7],
+  foot: [5, 8],
+  upperArm: [9, 11],
+  forearm: [10, 12],
+} as const;
+const BONE_COUNT = 13;
+
+const tmpPos = new Vector3();
+const tmpDir = new Vector3();
+const tmpX = new Vector3();
+const tmpY = new Vector3();
+const tmpScale = new Vector3(1, 1, 1);
+const tmpQuat = new Quaternion();
+const UP = Vector3.Up();
+const FWD = Vector3.Forward();
+
+/**
+ * One combatant. The whole body is a single skinned mesh (plus one for its
+ * light strips): every rigid part is skinned 100 % to its own bone and the
+ * procedural animation/IK writes the bone transforms each frame. That keeps
+ * a character at ~5 draw calls instead of ~20 (8 bots used to cost ~150).
+ */
 class AgentVisual {
   /** every mesh (for visibility, fading and shadow casting) */
   readonly parts: Mesh[] = [];
   private readonly body: StandardMaterial;
   private readonly baseEmissive: Color3;
-  private readonly pelvis: Mesh;
-  private readonly torso: Mesh;
-  private readonly head: Mesh;
+  private readonly skeleton: Skeleton;
+  private readonly bones: Bone[];
   private readonly guns: Map<WeaponId, Mesh>;
-  private readonly legs: { thigh: Mesh; shin: Mesh; foot: Mesh; phaseOffset: number; side: number }[];
-  private readonly arms: { upper: Mesh; fore: Mesh; side: number }[];
   private readonly blob: Mesh;
   private phase = 0;
   private flash = 0;
@@ -260,30 +578,80 @@ class AgentVisual {
       shared.glow.set(skin.glow, glow);
     }
 
-    const part = (name: string, pieces: Piece[], glowPieces?: Piece[]): Mesh => {
-      const m = buildPart(scene, `${name}-${id}`, pieces, this.body);
-      m.receiveShadows = false;
-      this.parts.push(m);
-      if (glowPieces) {
-        const g = buildPart(scene, `${name}-glow-${id}`, glowPieces, glow!);
-        g.parent = m;
-        this.parts.push(g);
+    this.skeleton = new Skeleton(`skel-${id}`, `skel-${id}`, scene);
+    this.bones = Array.from({ length: BONE_COUNT }, (_, i) => new Bone(`b${i}`, this.skeleton, null, Matrix.Identity()));
+
+    const skinned = (name: string, groups: { bone: number; pieces: Piece[] }[], material: StandardMaterial): Mesh => {
+      let acc: VertexData | null = null;
+      for (const g of groups) {
+        const tmp = buildPart(scene, `${name}-tmp`, g.pieces, material);
+        const vd = VertexData.ExtractFromMesh(tmp, true, true);
+        tmp.dispose();
+        const n = vd.positions!.length / 3;
+        const idx = new Array<number>(n * 4).fill(0);
+        const wts = new Array<number>(n * 4).fill(0);
+        for (let i = 0; i < n; i++) {
+          idx[i * 4] = g.bone;
+          wts[i * 4] = 1;
+        }
+        vd.matricesIndices = idx;
+        vd.matricesWeights = wts;
+        if (acc) acc.merge(vd);
+        else acc = vd;
       }
+      const m = new Mesh(`${name}-${id}`, scene);
+      acc!.applyToMesh(m, false);
+      m.material = material;
+      m.skeleton = this.skeleton;
+      m.numBoneInfluencers = 1;
+      m.isPickable = false;
+      m.receiveShadows = false;
+      // bounds of a skinned mesh don't follow the bones: always draw (there are few)
+      m.alwaysSelectAsActiveMesh = true;
+      m.doNotSyncBoundingInfo = true;
+      this.parts.push(m);
       return m;
     };
 
-    this.pelvis = part('pelvis', pelvisPieces(pal));
-    this.torso = part('torso', torsoPieces(pal), torsoGlow(pal));
-    this.head = part('head', headPieces(pal, style), headGlow(pal, style));
-    this.guns = new Map((['rifle', 'sidearm', 'sniper'] as WeaponId[]).map((w) => [w, part(`gun-${w}`, gunPieces(pal, w), gunGlow(pal, w))]));
-    this.legs = [-1, 1].map((side, i) => ({
-      thigh: part('thigh', thighPieces(pal)),
-      shin: part('shin', shinPieces(pal)),
-      foot: part('foot', footPieces(pal)),
-      phaseOffset: i * Math.PI,
-      side,
-    }));
-    this.arms = [-1, 1].map((side) => ({ upper: part('uarm', upperArmPieces(pal)), fore: part('farm', forearmPieces(pal), forearmGlow(pal)), side }));
+    skinned(
+      'body',
+      [
+        { bone: BONE.pelvis, pieces: pelvisPieces(pal) },
+        { bone: BONE.torso, pieces: torsoPieces(pal) },
+        { bone: BONE.head, pieces: headPieces(pal, style) },
+        ...[0, 1].flatMap((i) => [
+          { bone: BONE.thigh[i], pieces: thighPieces(pal) },
+          { bone: BONE.shin[i], pieces: shinPieces(pal) },
+          { bone: BONE.foot[i], pieces: footPieces(pal) },
+          { bone: BONE.upperArm[i], pieces: upperArmPieces(pal) },
+          { bone: BONE.forearm[i], pieces: forearmPieces(pal) },
+        ]),
+      ],
+      this.body,
+    );
+    skinned(
+      'trim',
+      [
+        { bone: BONE.torso, pieces: torsoGlow(pal) },
+        { bone: BONE.head, pieces: headGlow(pal, style) },
+      ],
+      glow,
+    );
+
+    this.guns = new Map(
+      (['rifle', 'sidearm', 'sniper'] as WeaponId[]).map((w) => {
+        const g = buildPart(scene, `gun-${w}-${id}`, gunPieces(pal, w), this.body);
+        const t = buildPart(scene, `gun-${w}-glow-${id}`, gunGlow(pal, w), glow!);
+        t.parent = g;
+        for (const m of [g, t]) {
+          m.alwaysSelectAsActiveMesh = true;
+          m.doNotSyncBoundingInfo = true;
+          m.receiveShadows = false;
+          this.parts.push(m);
+        }
+        return [w, g] as [WeaponId, Mesh];
+      }),
+    );
 
     this.blob = CreateDisc(`blob-${id}`, { radius: 0.45, tessellation: 16 }, scene);
     this.blob.material = shared.blob;
@@ -301,6 +669,31 @@ class AgentVisual {
       if (on) sg.addShadowCaster(p, false);
       else sg.removeShadowCaster(p, false);
     }
+  }
+
+  /** Place a bone: translation + rotation (+ optional Y scale). */
+  private pose(bone: number, x: number, y: number, z: number, q: Quaternion, scaleY = 1): void {
+    const b = this.bones[bone];
+    tmpScale.set(1, scaleY, 1);
+    b.setScale(tmpScale);
+    b.setRotationQuaternion(q);
+    b.setPosition(tmpPos.set(x, y, z));
+  }
+
+  /** Place a limb bone at joint `a`, pointing its +Z axis at joint `c`. */
+  private limb(bone: number, a: V3, c: V3): void {
+    tmpDir.set(c.x - a.x, c.y - a.y, c.z - a.z);
+    if (tmpDir.lengthSquared() < 1e-10) tmpDir.copyFrom(FWD);
+    tmpDir.normalize();
+    // avoid a degenerate basis when the limb points straight up/down
+    const up = Math.abs(tmpDir.y) > 0.98 ? FWD : UP;
+    // NB: FromLookDirectionLH assumes `up` ⟂ direction and twists limbs otherwise,
+    // so build the orthonormal basis (+Z along the limb) explicitly.
+    Vector3.CrossToRef(up, tmpDir, tmpX);
+    tmpX.normalize();
+    Vector3.CrossToRef(tmpDir, tmpX, tmpY);
+    Quaternion.RotationQuaternionFromAxisToRef(tmpX, tmpY, tmpDir, tmpQuat);
+    this.pose(bone, a.x, a.y, a.z, tmpQuat);
   }
 
   update(p: AgentPose, dt: number, visible: boolean, bvh: Bvh, blobShadow: boolean): void {
@@ -346,20 +739,21 @@ class AgentVisual {
 
     const pelvisY = p.y + p.height * 0.53 - death * (p.height * 0.4) + (p.grounded ? Math.abs(Math.sin(this.phase)) * 0.035 * moveAmt : 0);
     const lean = death * 1.35; // fall backwards
-    this.pelvis.position.set(p.x, pelvisY, p.z);
-    this.pelvis.rotation.set(0, p.yaw, 0);
+    this.pose(BONE.pelvis, p.x, pelvisY, p.z, Quaternion.RotationYawPitchRollToRef(p.yaw, 0, 0, tmpQuat));
 
     // torso pivots at the waist
     const torsoLen = p.height * 0.31;
     const tilt = -p.pitch * 0.25 + lean + (p.alive ? speed * 0.012 : 0);
     const waistY = pelvisY + 0.08;
-    this.torso.position.set(p.x, waistY, p.z);
-    this.torso.rotation.set(-tilt, p.yaw, 0);
-    this.torso.scaling.y = torsoLen / TORSO_REF * 1.0;
+    this.pose(BONE.torso, p.x, waistY, p.z, Quaternion.RotationYawPitchRollToRef(p.yaw, -tilt, 0, tmpQuat), torsoLen / TORSO_REF);
     const up = torsoLen * (0.54 / TORSO_REF);
-    const neck = new Vector3(p.x - fx * Math.sin(tilt) * up, waistY + Math.cos(tilt) * up, p.z - fz * Math.sin(tilt) * up);
-    this.head.position.copyFrom(neck);
-    this.head.rotation.set(-p.pitch * 0.6 - tilt, p.yaw, 0);
+    this.pose(
+      BONE.head,
+      p.x - fx * Math.sin(tilt) * up,
+      waistY + Math.cos(tilt) * up,
+      p.z - fz * Math.sin(tilt) * up,
+      Quaternion.RotationYawPitchRollToRef(p.yaw, -p.pitch * 0.6 - tilt, 0, tmpQuat),
+    );
     this.blob.position.set(p.x, groundAt(bvh, p.x, p.y + 0.5, p.z) + 0.02, p.z);
 
     // gun held in front of the chest along the aim direction
@@ -370,28 +764,30 @@ class AgentVisual {
     const shoulderY = waistY + Math.cos(tilt) * up * 0.86;
     const chestX = p.x - fx * Math.sin(tilt) * up * 0.86;
     const chestZ = p.z - fz * Math.sin(tilt) * up * 0.86;
-    const gunBase = new Vector3(chestX + rx * 0.12 + fx * 0.12, shoulderY - 0.14, chestZ + rz * 0.12 + fz * 0.12);
+    const gbx = chestX + rx * 0.12 + fx * 0.12;
+    const gby = shoulderY - 0.14;
+    const gbz = chestZ + rz * 0.12 + fz * 0.12;
     const gunLen = p.weapon === 'sniper' ? 1.0 : p.weapon === 'sidearm' ? 0.28 : 0.7;
     const gun = this.guns.get(p.weapon)!;
-    gun.position.copyFrom(gunBase);
-    gun.lookAt(gunBase.add(new Vector3(ax, ay - death, az)));
-    this.muzzle.copyFrom(gunBase.add(new Vector3(ax, ay, az).scale(gunLen * 0.95)));
+    gun.position.set(gbx, gby, gbz);
+    gun.lookAt(segTarget.set(gbx + ax, gby + ay - death, gbz + az));
+    this.muzzle.set(gbx + ax * gunLen * 0.95, gby + ay * gunLen * 0.95, gbz + az * gunLen * 0.95);
 
     // arms: right hand on the grip, left hand on the foregrip
-    for (const arm of this.arms) {
-      const sh = { x: chestX + rx * 0.26 * arm.side, y: shoulderY, z: chestZ + rz * 0.26 * arm.side };
-      const reach = arm.side > 0 ? 0.0 : gunLen * 0.5;
-      const hand = { x: gunBase.x + ax * reach, y: gunBase.y + ay * reach - 0.02, z: gunBase.z + az * reach };
-      const pole = { x: sh.x + rx * arm.side * 0.4 - fx * 0.2, y: sh.y - 0.6, z: sh.z + rz * arm.side * 0.4 - fz * 0.2 };
+    for (const [i, side] of [[0, -1], [1, 1]] as const) {
+      const sh = { x: chestX + rx * 0.26 * side, y: shoulderY, z: chestZ + rz * 0.26 * side };
+      const reach = side > 0 ? 0.0 : gunLen * 0.5;
+      const hand = { x: gbx + ax * reach, y: gby + ay * reach - 0.02, z: gbz + az * reach };
+      const pole = { x: sh.x + rx * side * 0.4 - fx * 0.2, y: sh.y - 0.6, z: sh.z + rz * side * 0.4 - fz * 0.2 };
       const s = solveTwoBone(sh, hand, UPPER_ARM, FOREARM, pole);
-      placeSegment(arm.upper, sh, s.knee);
-      placeSegment(arm.fore, s.knee, s.foot);
+      this.limb(BONE.upperArm[i], sh, s.knee);
+      this.limb(BONE.forearm[i], s.knee, s.foot);
     }
 
     // legs: planted feet with procedural stepping, ground found by raycast
-    for (const leg of this.legs) {
-      const hip = { x: p.x + rx * 0.11 * leg.side, y: pelvisY - 0.08, z: p.z + rz * 0.11 * leg.side };
-      const ph = this.phase + leg.phaseOffset;
+    for (const [i, side] of [[0, -1], [1, 1]] as const) {
+      const hip = { x: p.x + rx * 0.11 * side, y: pelvisY - 0.08, z: p.z + rz * 0.11 * side };
+      const ph = this.phase + i * Math.PI;
       const swing = Math.cos(ph) * 0.38 * moveAmt * (stride / 1.5);
       const lift = Math.max(0, Math.sin(ph)) * 0.2 * moveAmt * (p.grounded ? 1 : 0);
       const fxw = hip.x + mdx * swing;
@@ -401,25 +797,23 @@ class AgentVisual {
       const footTarget = { x: fxw, y: gy + 0.08 + lift, z: fzw };
       const pole = { x: hip.x + fx * 1.2, y: hip.y - 0.3, z: hip.z + fz * 1.2 };
       const s = solveTwoBone(hip, footTarget, THIGH, SHIN, pole);
-      placeSegment(leg.thigh, hip, s.knee);
-      placeSegment(leg.shin, s.knee, s.foot);
-      leg.foot.position.set(s.foot.x, s.foot.y, s.foot.z);
-      leg.foot.rotation.set(0, p.yaw, 0);
+      this.limb(BONE.thigh[i], hip, s.knee);
+      this.limb(BONE.shin[i], s.knee, s.foot);
+      this.pose(BONE.foot[i], s.foot.x, s.foot.y, s.foot.z, Quaternion.RotationYawPitchRollToRef(p.yaw, 0, 0, tmpQuat));
     }
   }
 
   dispose(): void {
     for (const p of this.parts) p.dispose();
+    this.skeleton.dispose();
     this.blob.dispose();
     this.body.dispose();
   }
 }
 
 /** Limb meshes start at their parent joint and point along +Z. */
-function placeSegment(m: Mesh, a: V3, b: V3): void {
-  m.position.set(a.x, a.y, a.z);
-  m.lookAt(new Vector3(b.x, b.y, b.z));
-}
+const segTarget = new Vector3();
+
 
 function groundAt(bvh: Bvh, x: number, fromY: number, z: number): number {
   const hit = bvh.raycast(x, fromY, z, 0, -1, 0, 1.6);
@@ -429,23 +823,38 @@ function groundAt(bvh: Bvh, x: number, fromY: number, z: number): number {
 /** All agent visuals for a world. */
 export class CharacterSet {
   private readonly visuals = new Map<number, AgentVisual>();
-  private readonly shared: { glow: Map<string, StandardMaterial>; blob: StandardMaterial };
+  private readonly shared: {
+    glow: Map<string, StandardMaterial>;
+    blob: StandardMaterial;
+  };
   private castShadows = false;
 
   /**
    * @param viewerTeam team of the local player (enemies get a strong rim
    *   highlight); -1 for spectator views where both teams are highlighted.
    */
-  constructor(scene: Scene, roster: readonly { id: number; team: 0 | 1 }[], viewerTeam: 0 | 1 | -1 = -1) {
-    const blob = new StandardMaterial('char-blob', scene);
+  constructor(
+    scene: Scene,
+    roster: readonly { id: number; team: 0 | 1 }[],
+    viewerTeam: 0 | 1 | -1 = -1,
+  ) {
+    const blob = new StandardMaterial("char-blob", scene);
     blob.diffuseColor = C3.Black();
     blob.specularColor = C3.Black();
     blob.alpha = 0.35;
     blob.disableLighting = true;
     this.shared = { glow: new Map(), blob };
     for (const a of roster) {
-      const rim = viewerTeam === -1 ? (CHARACTER_LOOK.enemyRim + CHARACTER_LOOK.allyRim) / 2 : a.team === viewerTeam ? CHARACTER_LOOK.allyRim : CHARACTER_LOOK.enemyRim;
-      this.visuals.set(a.id, new AgentVisual(scene, a.id, a.team, rim, this.shared));
+      const rim =
+        viewerTeam === -1
+          ? (CHARACTER_LOOK.enemyRim + CHARACTER_LOOK.allyRim) / 2
+          : a.team === viewerTeam
+            ? CHARACTER_LOOK.allyRim
+            : CHARACTER_LOOK.enemyRim;
+      this.visuals.set(
+        a.id,
+        new AgentVisual(scene, a.id, a.team, rim, this.shared),
+      );
     }
   }
 
@@ -467,8 +876,16 @@ export class CharacterSet {
     return this.visuals.get(id)?.muzzle ?? null;
   }
 
-  update(poses: readonly AgentPose[], dt: number, hideId: number, bvh: Bvh): void {
-    for (const p of poses) this.visuals.get(p.id)?.update(p, dt, p.id !== hideId, bvh, !this.castShadows);
+  update(
+    poses: readonly AgentPose[],
+    dt: number,
+    hideId: number,
+    bvh: Bvh,
+  ): void {
+    for (const p of poses)
+      this.visuals
+        .get(p.id)
+        ?.update(p, dt, p.id !== hideId, bvh, !this.castShadows);
   }
 
   dispose(): void {

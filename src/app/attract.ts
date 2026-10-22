@@ -1,6 +1,5 @@
 import { BOT_NAMES } from '../config/bots';
 import { MOVEMENT } from '../config/movement';
-import { LIGHTING_MOODS } from '../config/visuals';
 import { GameRenderer } from '../render/game-renderer';
 import { FixedStep } from '../sim/core/fixed-step';
 import type { SimEvent } from '../sim/events';
@@ -10,6 +9,10 @@ import { Hud } from '../ui/hud';
 import { SmoothCam, shoulderCam } from './cameras';
 import type { ModeContext } from './match';
 import { WorldView } from './world-view';
+import { STAGES } from '../sim/map/registry';
+
+/** bots per side in the title-screen demo */
+const ATTRACT_TEAM = 4;
 
 const TICK = MOVEMENT.tickRate;
 
@@ -40,7 +43,7 @@ export class AttractMode {
   ) {
     this.world = this.newWorld();
     this.renderer = new GameRenderer(ctx.gfx.engine, this.world.map, this.world.agents, ctx.quality, ctx.features);
-    this.renderer.setMood(LIGHTING_MOODS[1 % LIGHTING_MOODS.length]);
+    this.renderer.setMood(this.renderer.moods[1 % this.renderer.moods.length]);
     this.view = new WorldView(this.renderer, null, this.world);
     this.view.onEvent = (e) => this.onEvent(e);
     this.hud = new Hud(ctx.ui, ctx.input.bindings);
@@ -52,10 +55,13 @@ export class AttractMode {
   private newWorld(): World {
     const roster: AgentSpec[] = [];
     if (this.bots) {
-      for (let i = 0; i < 3; i++) roster.push({ team: 0, isBot: true, name: BOT_NAMES[(i + 3) % BOT_NAMES.length], difficulty: 'hard' });
-      for (let i = 0; i < 3; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i], difficulty: 'normal' });
+      for (let i = 0; i < ATTRACT_TEAM; i++) roster.push({ team: 0, isBot: true, name: BOT_NAMES[(i + 3) % BOT_NAMES.length], difficulty: 'hard' });
+      for (let i = 0; i < ATTRACT_TEAM; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i % BOT_NAMES.length], difficulty: 'normal' });
     }
+    // cycle through the stage maps so visitors see all of them
+    const mapId = STAGES[this.matchCount % STAGES.length].map;
     const w = new World({
+      mapId,
       // ?seed=N makes the demo reproducible (performance profiling)
       seed: ((Number(new URLSearchParams(location.search).get('seed')) || Date.now()) + this.matchCount * 7919) >>> 0,
       roster,
@@ -82,7 +88,7 @@ export class AttractMode {
       this.focus = e.killer;
       this.focusTimer = 4;
     }
-    if (e.type === 'phase' && e.phase === 'prep') this.renderer.setMood(LIGHTING_MOODS[(e.round + 1) % LIGHTING_MOODS.length]);
+    if (e.type === 'phase' && e.phase === 'prep') this.renderer.setMood(this.renderer.moods[(e.round + 1) % this.renderer.moods.length]);
   }
 
   frame(realDt: number): void {
@@ -99,6 +105,7 @@ export class AttractMode {
         // loop forever with a fresh match
         this.world = this.newWorld();
         this.view.attach(this.world);
+        this.renderer.setMood(this.renderer.moods[0]);
       }
     }
 
@@ -125,11 +132,18 @@ export class AttractMode {
       this.focusTimer = 8;
     }
     if (!this.bots || alive.length === 0 || w.round.phase === 'prep') {
-      // cinematic orbit around the site
+      // cinematic orbit around the site, pulled in front of any wall in the way
       const a = this.time * 0.08;
-      const r = 26;
       const s = w.map.relay;
-      target = { x: s.x + Math.sin(a) * r, y: 9, z: s.z + Math.cos(a) * r, yaw: a + Math.PI, pitch: -0.28 };
+      const cy = s.y + 7;
+      const dx = Math.sin(a);
+      const dz = Math.cos(a);
+      const dy = (cy - (s.y + 2)) / 18;
+      const len = Math.hypot(dx, dy, dz);
+      const hit = w.bvh.raycast(s.x, s.y + 2, s.z, dx / len, dy / len, dz / len, 18 * len);
+      const r = hit ? Math.max(4, (hit.t / len) - 1.2) : 18;
+      const camY = s.y + 2 + dy * r;
+      target = { x: s.x + dx * r, y: camY, z: s.z + dz * r, yaw: a + Math.PI, pitch: -Math.atan2(camY - s.y - 1, r) };
       if (this.lastFocus !== -2) this.cam.snap(target);
       else this.cam.follow(target, dt, 2);
       this.lastFocus = -2;
@@ -170,7 +184,7 @@ export class AttractMode {
           round: w.round.index,
           capture: w.round.captureProgress,
           alive: [w.aliveCount(0), w.aliveCount(1)],
-          total: [3, 3],
+          total: [ATTRACT_TEAM, ATTRACT_TEAM],
           callout: w.agents[this.focus]?.name ?? '',
           spreadPx: 0,
           scoped: false,

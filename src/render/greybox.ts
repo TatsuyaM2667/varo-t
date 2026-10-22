@@ -1,7 +1,7 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import type { Scene } from '@babylonjs/core/scene';
-import { PALETTE } from '../config/visuals';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Collider, MaterialTag } from '../sim/physics/aabb';
 import type { SurfaceMaterials } from './materials';
 
@@ -24,8 +24,10 @@ export function boxesToVertexData(boxes: readonly Collider[], tileMetres: number
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
+  const colors: number[] = [];
   const indices: number[] = [];
   for (const b of boxes) {
+    const tint = b.tint ? Color3.FromHexString(b.tint) : null;
     const mn = [b.minX, b.minY, b.minZ];
     const mx = [b.maxX, b.maxY, b.maxZ];
     for (const f of FACES) {
@@ -47,6 +49,10 @@ export function boxesToVertexData(boxes: readonly Collider[], tileMetres: number
         p[f.v] = cv;
         positions.push(p[0], p[1], p[2]);
         normals.push(f.n[0], f.n[1], f.n[2]);
+        // per-collider tint (zone colours); tops slightly brighter than sides
+        const shade = axis === 1 ? 1.04 : 1;
+        if (tint) colors.push(Math.min(1, tint.r * shade), Math.min(1, tint.g * shade), Math.min(1, tint.b * shade), 1);
+        else colors.push(1, 1, 1, 1);
         uvs.push(cu / tileMetres, cv / tileMetres);
       }
       // Babylon's front faces wind so that cross(p1 - p0, p2 - p0) opposes the normal.
@@ -64,6 +70,7 @@ export function boxesToVertexData(boxes: readonly Collider[], tileMetres: number
   vd.positions = positions;
   vd.normals = normals;
   vd.uvs = uvs;
+  vd.colors = colors;
   vd.indices = indices;
   return vd;
 }
@@ -77,12 +84,13 @@ export interface Greybox {
 }
 
 export function buildGreybox(scene: Scene, colliders: readonly Collider[], mats: SurfaceMaterials, pbr: boolean): Greybox {
+  const surfaces = mats.surfaces;
   const groups = new Map<MaterialTag, Collider[]>();
   const breakables = new Map<number, Mesh>();
   for (const c of colliders) {
     if (c.breakHp !== undefined) {
       const m = new Mesh(`break-${c.id}`, scene);
-      boxesToVertexData([c], PALETTE.surfaces[c.material].tileMetres).applyToMesh(m, false);
+      boxesToVertexData([c], surfaces[c.material].tileMetres).applyToMesh(m, false);
       m.material = mats.get(c.material, pbr);
       m.receiveShadows = true;
       m.isPickable = false;
@@ -96,7 +104,7 @@ export function buildGreybox(scene: Scene, colliders: readonly Collider[], mats:
   const statics: Mesh[] = [];
   for (const [tag, boxes] of groups) {
     const mesh = new Mesh(`map-${tag}`, scene);
-    boxesToVertexData(boxes, PALETTE.surfaces[tag].tileMetres).applyToMesh(mesh, false);
+    boxesToVertexData(boxes, surfaces[tag].tileMetres).applyToMesh(mesh, false);
     mesh.material = mats.get(tag, pbr);
     mesh.receiveShadows = true;
     mesh.isPickable = false;

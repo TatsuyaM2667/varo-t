@@ -1,21 +1,20 @@
-# Map validation (Meridian Yard)
+# Map validation
 
-Generated 2026-10-21T17:16:52.454Z by `tools/validate-map.ts`.
+Generated 2026-10-22T14:43:58.791Z by `tools/validate-map.ts`.
 
-| layout | site points | death-spot % (≥3 posts see you) | max exposure | covers w/o safe spot | longest sightline | spawns see each other | generator checks |
+| layout | site points | death-spot % (no cover within 3 m from half the posts) | max exposure | covers w/o safe spot | longest sightline | spawns see each other | extra checks |
 |---|---|---|---|---|---|---|---|
-| authored | 129 | 13.2% | 6 | 0 | 81.5 m | no | ok |
-| seed 1 | 130 | 19.2% | 6 | 0 | 81.5 m | no | ok |
-| seed 2 | 125 | 19.2% | 6 | 0 | 81.5 m | no | ok |
-| seed 3 | 126 | 27.0% | 6 | 0 | 81.5 m | no | ok |
-| seed 4 | 125 | 30.4% | 6 | 0 | 81.5 m | no | ok |
-| seed 5 | 130 | 16.2% | 6 | 0 | 81.5 m | no | ok |
-| seed 6 | 126 | 17.5% | 6 | 0 | 79.5 m | no | ok |
-| seed 7 | 128 | 19.5% | 6 | 0 | 81.5 m | no | ok |
-| seed 8 | 133 | 14.3% | 6 | 0 | 81.5 m | no | ok |
-| seed 9 | 133 | 15.8% | 6 | 0 | 81.5 m | no | ok |
-| seed 10 | 128 | 15.6% | 6 | 0 | 81.5 m | no | ok |
+| bazaar (easy) | 184 | 16.3% | 7 | 0 | 85.5 m (long lane) | no | ok |
+| terrace (normal) | 148 | 2.7% | 7 | 0 | 77.5 m | no | ok |
+| foundry (hard) | 152 | 13.2% | 7 | 0 | 77.5 m | no | ok |
+| yard (authored) | 133 | 12.8% | 6 | 0 | 81.5 m | no | ok |
+| yard seed 1 | 134 | 18.7% | 6 | 0 | 81.5 m | no | ok |
+| yard seed 2 | 129 | 18.6% | 6 | 0 | 81.5 m | no | ok |
+| yard seed 3 | 128 | 26.6% | 6 | 0 | 81.5 m | no | ok |
+| yard seed 4 | 129 | 29.5% | 6 | 0 | 81.5 m | no | ok |
+| yard seed 5 | 132 | 15.9% | 6 | 0 | 81.5 m | no | ok |
+| yard seed 6 | 130 | 16.9% | 6 | 0 | 79.5 m | no | ok |
 
-Limits: death-spot ≤ 35%, longest sightline ≤ 85 m, no spawn-to-spawn sight lines.
+Limits: death-spot ≤ 35%, no spawn-to-spawn sight lines. Sightlines over 85 m are flagged as long lanes (intended for the sniper on stage maps).
 
 **All layouts pass.**

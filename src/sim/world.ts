@@ -33,6 +33,7 @@ import type { NoiseSource, RoundEndReason, RoundPhase, SimEvent } from './events
 import { Btn, type InputFrame, emptyInput, has } from './input-frame';
 import { generateCoverLayout } from './map/generator';
 import { type MapData, buildMeridianYard } from './map/map-def';
+import { type MapId, buildMap } from './map/registry';
 import type { MaterialTag } from './physics/aabb';
 import { Bvh } from './physics/bvh';
 
@@ -65,6 +66,8 @@ export interface WorldOptions {
   roster: AgentSpec[];
   features?: Partial<SimFeatures>;
   roundsToWin?: number;
+  /** which map to play (default: Meridian Yard) */
+  mapId?: MapId;
 }
 
 export interface RoundState {
@@ -99,6 +102,7 @@ export class World {
   readonly seed: number;
   readonly features: SimFeatures;
   readonly roster: AgentSpec[];
+  readonly mapId: MapId;
   map: MapData;
   bvh: Bvh;
   nav: NavGrid;
@@ -125,7 +129,8 @@ export class World {
     this.seed = opts.seed >>> 0;
     this.features = { ...DEFAULT_SIM_FEATURES, ...opts.features };
     this.roster = opts.roster.map((r) => ({ ...r }));
-    this.defaultMap = buildMeridianYard();
+    this.mapId = opts.mapId ?? 'yard';
+    this.defaultMap = buildMap(this.mapId);
     this.defaultBvh = new Bvh(this.defaultMap.colliders);
     this.defaultNav = new NavGrid(this.defaultMap, this.defaultBvh);
     this.map = this.defaultMap;
@@ -152,7 +157,8 @@ export class World {
   startRound(index: number): void {
     const rs = this.roundSeed(index);
     this.rng.reseed(rs);
-    if (this.features.seededMap) {
+    // seeded cover layouts exist for Meridian Yard only
+    if (this.features.seededMap && this.mapId === 'yard') {
       const layoutRng = new Rng(rs ^ 0x5eed);
       this.map = buildMeridianYard(generateCoverLayout(layoutRng), `seed:${rs}`);
       this.bvh = new Bvh(this.map.colliders);
@@ -465,6 +471,11 @@ export class World {
     }
   }
 
+  /** Seconds per round on the current map. */
+  get roundTime(): number {
+    return this.map.roundTime ?? RULES.roundTime;
+  }
+
   aliveCount(team: Team): number {
     let n = 0;
     for (const a of this.agents) if (a.team === team && a.alive) n++;
@@ -500,7 +511,7 @@ export class World {
         if (this.aliveCount(1) === 0) this.endRound(0, 'elimination');
         else if (this.aliveCount(0) === 0) this.endRound(1, 'elimination');
         else if (r.captureProgress >= 1) this.endRound(0, 'capture');
-        else if (r.phaseTicks + 1 >= RULES.roundTime * TICK) this.endRound(1, 'time');
+        else if (r.phaseTicks + 1 >= this.roundTime * TICK) this.endRound(1, 'time');
         break;
       }
       case 'end':
@@ -538,7 +549,7 @@ export class World {
   /** Seconds left in the current phase (for the HUD). */
   phaseTimeLeft(): number {
     const r = this.round;
-    const len = r.phase === 'prep' ? RULES.prepTime : r.phase === 'live' ? RULES.roundTime : r.phase === 'end' ? RULES.roundEndTime : 0;
+    const len = r.phase === 'prep' ? RULES.prepTime : r.phase === 'live' ? this.roundTime : r.phase === 'end' ? RULES.roundEndTime : 0;
     return Math.max(0, len - r.phaseTicks / TICK);
   }
 

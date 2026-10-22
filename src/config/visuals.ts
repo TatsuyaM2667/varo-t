@@ -10,6 +10,8 @@ export interface GridStyle {
   /** grid cells per texture tile */
   divisions: number;
   noise: number;
+  /** drawing style (default: grid lines) */
+  pattern?: 'grid' | 'tile' | 'cobble' | 'brick' | 'plaster' | 'plate' | 'grass';
 }
 
 export interface SurfaceStyle {

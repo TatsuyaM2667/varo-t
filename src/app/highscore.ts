@@ -10,6 +10,10 @@ export interface MatchSummary {
   /** seconds left on the clock summed over rounds the attackers won */
   timeLeftOnWins: number;
   difficulty: string;
+  /** number of enemy bots (more enemies → higher multiplier) */
+  enemies?: number;
+  /** map id of the stage */
+  stage?: string;
 }
 
 export interface ScoreBreakdown {
@@ -33,13 +37,16 @@ export function computeScore(m: MatchSummary): ScoreBreakdown {
   const rounds = m.roundsWon * s.roundWin;
   const match = m.won ? s.matchWin : 0;
   const time = Math.round(m.timeLeftOnWins * s.timeBonusPerSecond);
-  const difficultyMul = DIFF_MUL[m.difficulty] ?? 1;
+  // 4 enemies = ×1.0, each extra enemy +12.5 %
+  const difficultyMul = +((DIFF_MUL[m.difficulty] ?? 1) * (0.5 + 0.125 * (m.enemies ?? 4))).toFixed(2);
   const total = Math.round((kills + headshots + damage + rounds + match + time) * difficultyMul);
   return { kills, headshots, damage, rounds, match, time, difficultyMul, total };
 }
 
 export interface HighScore {
   name: string;
+  /** map id of the stage, if recorded */
+  stage?: string;
   score: number;
   kills: number;
   won: boolean;

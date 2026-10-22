@@ -15,6 +15,16 @@ export interface NavPoint {
   z: number;
 }
 
+/**
+ * Static grid data per map key (maps are immutable once built). Each NavGrid
+ * still keeps its own Bvh for runtime queries (destroyed cover differs per
+ * world), only the precomputed arrays are shared — read-only after build.
+ */
+const STATIC_CACHE = new Map<string, { height: Float64Array; component: Int32Array; wallCost: Float64Array }>();
+
+/** highest floor surface (9 levels × 0.4 m) */
+const MAX_FLOOR = 3.65;
+
 const NEIGHBOURS: [number, number, number][] = [
   [1, 0, 1],
   [-1, 0, 1],
@@ -36,6 +46,8 @@ export class NavGrid {
   readonly height: Float64Array;
   /** connected-component id per cell (-1 blocked) */
   readonly component: Int32Array;
+  /** extra path cost for hugging walls (0 = open, higher = closer to a wall) */
+  readonly wallCost: Float64Array;
 
   // A* scratch
   private readonly g: Float64Array;
@@ -55,13 +67,21 @@ export class NavGrid {
     this.cols = Math.round((map.bounds.maxX - map.bounds.minX) / cell);
     this.rows = Math.round((map.bounds.maxZ - map.bounds.minZ) / cell);
     const n = this.cols * this.rows;
-    this.height = new Float64Array(n).fill(NaN);
-    this.component = new Int32Array(n).fill(-1);
+    // walkability only depends on the static layout: share it per map
+    const cached = STATIC_CACHE.get(map.key);
+    this.height = cached?.height ?? new Float64Array(n).fill(NaN);
+    this.component = cached?.component ?? new Int32Array(n).fill(-1);
+    this.wallCost = cached?.wallCost ?? new Float64Array(n);
     this.g = new Float64Array(n);
     this.parent = new Int32Array(n);
     this.stamp = new Uint32Array(n);
     this.closed = new Uint32Array(n);
-    this.build();
+    if (!cached) {
+      this.build();
+      STATIC_CACHE.set(map.key, { height: this.height, component: this.component, wallCost: this.wallCost });
+      // seeded layouts make a new key every round: keep the cache bounded
+      if (STATIC_CACHE.size > 16) STATIC_CACHE.delete(STATIC_CACHE.keys().next().value!);
+    }
   }
 
   private build(): void {
@@ -70,16 +90,32 @@ export class NavGrid {
       for (let c = 0; c < this.cols; c++) {
         const x = this.minX + (c + 0.5) * this.cell;
         const z = this.minZ + (r + 0.5) * this.cell;
-        const hit = this.bvh.raycast(x, 2.2, z, 0, -1, 0, 4);
-        if (!hit) continue;
-        const y = 2.2 - hit.t;
-        if (y > 1.6) continue;
+        const y = this.floorAt(x, z);
+        if (y === null) continue;
         probe.x = x;
         probe.y = y + 0.02;
         probe.z = z;
         if (bodyOverlaps(this.bvh, probe)) continue;
         this.height[r * this.cols + c] = y;
       }
+    }
+    // clearance: cells next to walls / drops cost more, so paths keep to the
+    // middle of doorways and corridors (bots have a body, corners snag)
+    for (let i = 0; i < this.height.length; i++) {
+      if (Number.isNaN(this.height[i])) continue;
+      const c = i % this.cols;
+      const r = (i - c) / this.cols;
+      let near = 0;
+      for (let dr = -2; dr <= 2; dr++) {
+        for (let dc = -2; dc <= 2; dc++) {
+          const nc = c + dc;
+          const nr = r + dr;
+          const j = nr * this.cols + nc;
+          const blocked = nc < 0 || nr < 0 || nc >= this.cols || nr >= this.rows || Number.isNaN(this.height[j]) || Math.abs(this.height[j] - this.height[i]) > MOVEMENT.stepHeight;
+          if (blocked) near = Math.max(near, Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 2 : 1);
+        }
+      }
+      this.wallCost[i] = near === 2 ? 0.9 : near === 1 ? 0.25 : 0;
     }
     // flood fill components
     let comp = 0;
@@ -99,6 +135,24 @@ export class NavGrid {
       }
       comp++;
     }
+  }
+
+  /**
+   * Height of the walkable floor at (x, z), or null. Floors go up to 3.6 m
+   * (level 9); anything higher is a roof, lintel or wall top, so the probe
+   * continues below it.
+   */
+  private floorAt(x: number, z: number): number | null {
+    let from = MAX_FLOOR + 1;
+    for (let k = 0; k < 4; k++) {
+      const hit = this.bvh.raycast(x, from, z, 0, -1, 0, from + 2);
+      if (!hit) return null;
+      const top = from - hit.t;
+      if (top <= MAX_FLOOR) return top;
+      from = hit.collider.minY - 0.01;
+      if (from < 0) return null;
+    }
+    return null;
   }
 
   private forEachNeighbour(i: number, fn: (nb: number, cost: number) => void): void {
@@ -209,7 +263,7 @@ export class NavGrid {
       const gc = this.g[cur];
       this.forEachNeighbour(cur, (nb, cost) => {
         if (this.closed[nb] === S) return;
-        const ng = gc + cost;
+        const ng = gc + cost + this.wallCost[nb] * this.cell;
         if (this.stamp[nb] !== S || ng < this.g[nb] - 1e-9) {
           this.stamp[nb] = S;
           this.g[nb] = ng;
@@ -240,7 +294,8 @@ export class NavGrid {
     }
     const nx = -dz / len;
     const nz = dx / len;
-    const r = MOVEMENT.bodyRadius + 0.05;
+    // keep a margin wider than the body so smoothed paths don't shave corners
+    const r = MOVEMENT.bodyRadius + 0.22;
     const y = Math.max(a.y, b.y);
     for (const off of [-r, r]) {
       for (const h of [0.5, 1.2]) {

@@ -9,11 +9,24 @@ import type { NoiseSource } from '../events';
 import { Btn, type InputFrame } from '../input-frame';
 import type { World } from '../world';
 import type { NavPoint } from './nav';
-import { DEFENSIVE_SMOKES, ENTRANCES, type Entrance, POSTS, type Post, ROUTES, type Route, nearestEntrance } from './tactics';
+import { Rng as TeamRng } from '../core/rng';
+import { type Post, type Route, type Tactics, nearestEntrance } from './tactics';
 
 const TICK = MOVEMENT.tickRate;
 const DT = 1 / TICK;
 const DEG = PI / 180;
+
+/** WASD combinations for the 8 headings, clockwise from forward. */
+const MOVE_DIRS = [
+  Btn.Forward,
+  Btn.Forward | Btn.Right,
+  Btn.Right,
+  Btn.Back | Btn.Right,
+  Btn.Back,
+  Btn.Back | Btn.Left,
+  Btn.Left,
+  Btn.Forward | Btn.Left,
+];
 
 export interface BotBrain {
   think(world: World, self: Agent, noises: readonly NoiseSource[]): InputFrame;
@@ -66,6 +79,10 @@ class Brain implements BotBrain {
   private repathTimer = 0;
   private stuckTimer = 0;
   private lastProgressPos = { x: 0, z: 0 };
+  private stuckLevel = 0;
+  private unstickTicks = 0;
+  private unstickDir = { x: 0, z: 0 };
+  private ditherAcc = 0;
 
   private post: Post | null = null;
   private route: Route | null = null;
@@ -245,11 +262,6 @@ class Brain implements BotBrain {
 
     if (move) buttons |= this.moveButtons(move.x, move.z);
     if (walk) buttons |= Btn.Walk;
-    if (this.stuckTimer > TICK * 0.8) {
-      buttons |= Btn.Jump;
-      this.stuckTimer = 0;
-      this.path = [];
-    }
     buttons |= this.pendingButtons;
     this.pendingButtons = 0;
     return {
@@ -264,19 +276,20 @@ class Brain implements BotBrain {
   private plan(world: World, self: Agent): void {
     const mates = world.agents.filter((a) => a.team === self.team);
     const idx = mates.indexOf(self);
+    const t = world.map.tactics;
     if (self.team === 1) {
-      // defenders: spread over entrances; coordination decides crossfire pairing
-      const ent = ENTRANCES[(idx + world.round.index) % 3];
-      const pair = POSTS[ent];
-      this.post = pair[this.rng.float() < 0.5 ? 0 : 1];
+      // defenders: every bot gets its own post (no two stand on the same spot)
+      const order = defenderPosts(t, mates.length, new TeamRng(world.roundSeed(world.round.index) ^ 0xd3f3));
+      this.post = order[idx % order.length];
       // one defender takes the long-range rifle
       this.setSlot(idx === 1 && this.rng.float() < 0.7 ? 3 : 1);
     } else {
       // attackers: coordinated teams stack one route, others split
       const shared = this.rngShared(world, self.team);
       const stack = shared < this.p.coordination;
-      const r = stack ? Math.floor(shared * 1000) % 3 : (idx + Math.floor(this.rng.float() * 3)) % 3;
-      this.route = ROUTES[r];
+      const n = t.routes.length;
+      const r = stack ? Math.floor(shared * 1000) % n : (idx + Math.floor(this.rng.float() * n)) % n;
+      this.route = t.routes[r];
       this.routeIdx = 0;
       this.setSlot(1);
     }
@@ -445,11 +458,12 @@ class Brain implements BotBrain {
       scores.push(['hold', 0.42]);
       // rotate toward a contested entrance when a teammate fights there
       const hot = this.hotEntrance(world);
-      if (hot && this.post && hot !== this.post.entrance && this.rng.float() < this.p.coordination) {
-        this.post = POSTS[hot][this.post === POSTS[this.post.entrance][0] ? 1 : 0];
+      if (hot && this.post && !this.post.forward && hot.id !== this.post.entrance && this.rng.float() < this.p.coordination) {
+        const options = world.map.tactics.posts.filter((p) => p.entrance === hot.id && !p.forward);
+        if (options.length) this.post = options[(self.id + world.round.index) % options.length];
         // defensive smoke to stall the push
         if (!this.smokeUsedPlan && self.smokeCharges > 0 && this.rng.float() < this.p.coordination) {
-          this.smokeAim = DEFENSIVE_SMOKES[hot];
+          this.smokeAim = hot.smoke;
           this.smokeUsedPlan = true;
         }
       }
@@ -478,14 +492,15 @@ class Brain implements BotBrain {
   }
 
   /** Entrance where a teammate recently saw/heard enemies. */
-  private hotEntrance(world: World): Entrance | null {
+  private hotEntrance(world: World) {
     let latest: Memory | null = null;
     for (const m of this.memory.values()) if (!latest || m.tick > latest.tick) latest = m;
     if (this.heard && (!latest || this.heard.tick > latest.tick)) latest = this.heard;
     if (!latest || world.round.tick - latest.tick > TICK * 2) return null;
-    // only react to enemies already past mid-map
-    if (latest.z < 0) return null;
-    return nearestEntrance(latest.x, latest.z);
+    // only react to enemies already close to one of the site entrances
+    const e = nearestEntrance(world.map.tactics, latest.x, latest.z);
+    if (!e || Math.sqrt((e.x - latest.x) ** 2 + (e.z - latest.z) ** 2) > 22) return null;
+    return e;
   }
 
   private freshestMemory(world: World): Memory | null {
@@ -610,28 +625,62 @@ class Brain implements BotBrain {
     const dx = wp.x - self.x;
     const dz = wp.z - self.z;
     const l = hyp(dx, dz);
-    // stuck detection
+    if (l < 1e-3) return null;
+    const ux = dx / l;
+    const uz = dz / l;
+
+    // stuck detection: wanting to move but not getting anywhere
     const prog = hyp(self.x - this.lastProgressPos.x, self.z - this.lastProgressPos.z);
     if (prog > 0.5) {
       this.lastProgressPos = { x: self.x, z: self.z };
       this.stuckTimer = 0;
+      this.stuckLevel = 0;
     } else this.stuckTimer++;
-    if (l < 1e-3) return null;
-    return { x: dx / l, z: dz / l };
+    if (this.unstickTicks > 0) {
+      this.unstickTicks--;
+      return this.unstickDir;
+    }
+    if (this.stuckTimer > TICK * 0.6) {
+      // sidestep toward the more open side (slightly backing off), then re-route
+      this.stuckTimer = 0;
+      this.stuckLevel++;
+      const px = -uz;
+      const pz = ux;
+      const open = (sx: number, sz: number): number => world.bvh.raycast(self.x, self.y + 0.6, self.z, sx, 0, sz, 2.5)?.t ?? 2.5;
+      const side = open(px, pz) >= open(-px, -pz) ? 1 : -1;
+      const ox = px * side - ux * 0.45;
+      const oz = pz * side - uz * 0.45;
+      const ol = hyp(ox, oz);
+      this.unstickDir = { x: ox / ol, z: oz / ol };
+      this.unstickTicks = Math.round(TICK * 0.35);
+      if (this.stuckLevel >= 2) this.pendingButtons |= Btn.Jump;
+      this.path = [];
+      return this.unstickDir;
+    }
+    return { x: ux, z: uz };
   }
 
   /** Convert a world-space move direction into WASD relative to the current view. */
+  /**
+   * World-space move direction → WASD relative to the view. Only 8 directions
+   * exist, so we alternate between the two nearest ones (sigma-delta
+   * dithering): the average heading then matches the path exactly instead of
+   * snapping to 45° steps, which used to wedge bots on doorway corners.
+   */
   private moveButtons(mx: number, mz: number): number {
     const c = cos(this.aimYaw);
     const s = sin(this.aimYaw);
     const right = mx * c - mz * s;
     const fwd = mx * s + mz * c;
-    let b = 0;
-    if (fwd > 0.38) b |= Btn.Forward;
-    else if (fwd < -0.38) b |= Btn.Back;
-    if (right > 0.38) b |= Btn.Right;
-    else if (right < -0.38) b |= Btn.Left;
-    return b;
+    const q = atan2(right, fwd) / (PI / 4); // 0 = forward, +2 = right
+    const lo = Math.floor(q);
+    this.ditherAcc += q - lo;
+    let k = lo;
+    if (this.ditherAcc >= 1) {
+      this.ditherAcc -= 1;
+      k = lo + 1;
+    }
+    return MOVE_DIRS[((k % 8) + 8) % 8];
   }
 }
 
@@ -664,4 +713,35 @@ export function throwPitch(self: Agent, target: { x: number; z: number }): numbe
     }
   }
   return best;
+}
+
+/**
+ * Post assignment for a defending team: about 40 % of defenders hold forward
+ * posts (meeting attackers on the way in), the rest are spread round-robin
+ * over the site entrances so every entrance is covered before any doubles up.
+ * The order is shuffled per round with a team-shared RNG.
+ */
+export function defenderPosts(t: Tactics, defenders: number, rng: TeamRng): Post[] {
+  const shuffle = <T>(a: T[]): T[] => {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  const site = t.posts.filter((p) => !p.forward);
+  const fwd = shuffle(t.posts.filter((p) => p.forward));
+  const entrances = shuffle([...new Set(site.map((p) => p.entrance))]);
+  const perEntrance = entrances.map((e) => shuffle(site.filter((p) => p.entrance === e)));
+  const siteOrder: Post[] = [];
+  for (let k = 0; siteOrder.length < site.length; k++) {
+    for (const list of perEntrance) if (k < list.length) siteOrder.push(list[k]);
+  }
+  const nFwd = fwd.length ? Math.min(fwd.length, Math.floor(defenders * 0.4)) : 0;
+  const out: Post[] = [];
+  for (let i = 0; i < defenders; i++) {
+    if (i < nFwd) out.push(fwd[i]);
+    else out.push(siteOrder[(i - nFwd) % siteOrder.length] ?? fwd[i % Math.max(1, fwd.length)]);
+  }
+  return out;
 }

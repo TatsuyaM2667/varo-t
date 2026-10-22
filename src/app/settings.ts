@@ -14,6 +14,10 @@ export interface Settings {
   difficulty: Difficulty;
   lang: Lang;
   bindings: Bindings;
+  /** selected stage (index into STAGES) */
+  stage: number;
+  /** enemy count; 0 = the stage's default */
+  enemies: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -23,7 +27,12 @@ export const DEFAULT_SETTINGS: Settings = {
   difficulty: DEFAULT_DIFFICULTY,
   lang: 'ja',
   bindings: defaultBindings(),
+  stage: 0,
+  enemies: 0,
 };
+
+/** upper limit of the enemy-count setting (defender spawns per map: 10) */
+export const MAX_ENEMIES = 8;
 
 const KEY = 'halcyon.settings.v1';
 
@@ -35,6 +44,8 @@ export function loadSettings(kv: KV): Settings {
   if (!['easy', 'normal', 'hard'].includes(s.difficulty)) s.difficulty = DEFAULT_DIFFICULTY;
   if (s.lang !== 'en') s.lang = 'ja';
   s.bindings = resolveBindings(s.bindings);
+  s.stage = Number.isInteger(s.stage) && s.stage >= 0 && s.stage < 3 ? s.stage : 0;
+  s.enemies = Number.isInteger(s.enemies) && s.enemies >= 0 && s.enemies <= MAX_ENEMIES ? s.enemies : 0;
   return s;
 }
 

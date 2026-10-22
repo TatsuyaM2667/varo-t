@@ -1,5 +1,4 @@
 import { cos, sin } from '../core/fmath';
-import { POSTS, ROUTES } from '../bots/tactics';
 import { NavGrid } from '../bots/nav';
 import { Bvh } from '../physics/bvh';
 import type { MapData } from './map-def';
@@ -44,7 +43,7 @@ function visible(bvh: Bvh, ax: number, ay: number, az: number, bx: number, by: n
 export function analyseLayout(map: MapData): LosReport {
   const bvh = new Bvh(map.colliders);
   const nav = new NavGrid(map, bvh);
-  const posts = Object.values(POSTS).flat();
+  const posts = map.tactics.posts.filter((p) => !p.forward);
   const site = map.siteZone;
 
   // exposure on (and around) the site, where attackers fight to capture
@@ -104,7 +103,7 @@ export function analyseLayout(map: MapData): LosReport {
         tz = p.z;
       }
     }
-    for (const r of ROUTES) {
+    for (const r of map.tactics.routes) {
       for (const w of r.waypoints) {
         const d = dist2d(w.x - cx, w.z - cz);
         if (d < best && d > 3) {

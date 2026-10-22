@@ -22,6 +22,10 @@
 | 15 | 音量バランス（銃声・足音・UI） | ヘッドホンで | `config/audio.ts` |
 | 16 | キャラの色・装備（攻撃側=暗色+琥珀ライン、防衛側=白アーマー+シアン） | 試合・デモ画面 | `config/skins.ts` `SKINS` |
 | 17 | 敵の縁取りの強さ・暗い面の持ち上げ | 撃ち合う | `config/skins.ts` `CHARACTER_LOOK.enemyRim / shadowLift` |
+| 18 | ステージの色合い（地区ごとの壁・床の色） | 各ステージを歩く | `sim/map/stages.ts` の zones（wall / floor） |
+| 19 | 装飾の量と色（窓・帯・木・屋台・旗・街灯） | 各ステージを歩く | `config/themes.ts` |
+| 20 | ステージの時間帯・明るさ（製鉄所は暗めにしてある） | ラウンドを進める | `config/themes.ts` の moods |
+| 21 | 敵の数と難易度の組み合わせ | タイトルのステージ選択・設定の敵の数 | `sim/map/registry.ts` の STAGES |
 
 ## このマシン（Radeon 680M）で自動確認済み
 - タイトル・試合・リザルト・リプレイ・キルカム・デモ画面のスクリーンショットを撮って確認
