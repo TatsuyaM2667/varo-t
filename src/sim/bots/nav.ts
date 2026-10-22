@@ -39,6 +39,8 @@ export class NavGrid {
   readonly height: Float64Array;
   /** connected-component id per cell (-1 blocked) */
   readonly component: Int32Array;
+  /** extra path cost for hugging walls (0 = open, higher = closer to a wall) */
+  readonly wallCost: Float64Array;
 
   // A* scratch
   private readonly g: Float64Array;
@@ -60,6 +62,7 @@ export class NavGrid {
     const n = this.cols * this.rows;
     this.height = new Float64Array(n).fill(NaN);
     this.component = new Int32Array(n).fill(-1);
+    this.wallCost = new Float64Array(n);
     this.g = new Float64Array(n);
     this.parent = new Int32Array(n);
     this.stamp = new Uint32Array(n);
@@ -81,6 +84,24 @@ export class NavGrid {
         if (bodyOverlaps(this.bvh, probe)) continue;
         this.height[r * this.cols + c] = y;
       }
+    }
+    // clearance: cells next to walls / drops cost more, so paths keep to the
+    // middle of doorways and corridors (bots have a body, corners snag)
+    for (let i = 0; i < this.height.length; i++) {
+      if (Number.isNaN(this.height[i])) continue;
+      const c = i % this.cols;
+      const r = (i - c) / this.cols;
+      let near = 0;
+      for (let dr = -2; dr <= 2; dr++) {
+        for (let dc = -2; dc <= 2; dc++) {
+          const nc = c + dc;
+          const nr = r + dr;
+          const j = nr * this.cols + nc;
+          const blocked = nc < 0 || nr < 0 || nc >= this.cols || nr >= this.rows || Number.isNaN(this.height[j]) || Math.abs(this.height[j] - this.height[i]) > MOVEMENT.stepHeight;
+          if (blocked) near = Math.max(near, Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 2 : 1);
+        }
+      }
+      this.wallCost[i] = near === 2 ? 0.9 : near === 1 ? 0.25 : 0;
     }
     // flood fill components
     let comp = 0;
@@ -228,7 +249,7 @@ export class NavGrid {
       const gc = this.g[cur];
       this.forEachNeighbour(cur, (nb, cost) => {
         if (this.closed[nb] === S) return;
-        const ng = gc + cost;
+        const ng = gc + cost + this.wallCost[nb] * this.cell;
         if (this.stamp[nb] !== S || ng < this.g[nb] - 1e-9) {
           this.stamp[nb] = S;
           this.g[nb] = ng;
@@ -259,7 +280,8 @@ export class NavGrid {
     }
     const nx = -dz / len;
     const nz = dx / len;
-    const r = MOVEMENT.bodyRadius + 0.05;
+    // keep a margin wider than the body so smoothed paths don't shave corners
+    const r = MOVEMENT.bodyRadius + 0.22;
     const y = Math.max(a.y, b.y);
     for (const off of [-r, r]) {
       for (const h of [0.5, 1.2]) {

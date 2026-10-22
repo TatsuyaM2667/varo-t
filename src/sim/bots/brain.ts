@@ -16,6 +16,18 @@ const TICK = MOVEMENT.tickRate;
 const DT = 1 / TICK;
 const DEG = PI / 180;
 
+/** WASD combinations for the 8 headings, clockwise from forward. */
+const MOVE_DIRS = [
+  Btn.Forward,
+  Btn.Forward | Btn.Right,
+  Btn.Right,
+  Btn.Back | Btn.Right,
+  Btn.Back,
+  Btn.Back | Btn.Left,
+  Btn.Left,
+  Btn.Forward | Btn.Left,
+];
+
 export interface BotBrain {
   think(world: World, self: Agent, noises: readonly NoiseSource[]): InputFrame;
   /** debug label for the current action */
@@ -67,6 +79,10 @@ class Brain implements BotBrain {
   private repathTimer = 0;
   private stuckTimer = 0;
   private lastProgressPos = { x: 0, z: 0 };
+  private stuckLevel = 0;
+  private unstickTicks = 0;
+  private unstickDir = { x: 0, z: 0 };
+  private ditherAcc = 0;
 
   private post: Post | null = null;
   private route: Route | null = null;
@@ -246,11 +262,6 @@ class Brain implements BotBrain {
 
     if (move) buttons |= this.moveButtons(move.x, move.z);
     if (walk) buttons |= Btn.Walk;
-    if (this.stuckTimer > TICK * 0.8) {
-      buttons |= Btn.Jump;
-      this.stuckTimer = 0;
-      this.path = [];
-    }
     buttons |= this.pendingButtons;
     this.pendingButtons = 0;
     return {
@@ -614,28 +625,62 @@ class Brain implements BotBrain {
     const dx = wp.x - self.x;
     const dz = wp.z - self.z;
     const l = hyp(dx, dz);
-    // stuck detection
+    if (l < 1e-3) return null;
+    const ux = dx / l;
+    const uz = dz / l;
+
+    // stuck detection: wanting to move but not getting anywhere
     const prog = hyp(self.x - this.lastProgressPos.x, self.z - this.lastProgressPos.z);
     if (prog > 0.5) {
       this.lastProgressPos = { x: self.x, z: self.z };
       this.stuckTimer = 0;
+      this.stuckLevel = 0;
     } else this.stuckTimer++;
-    if (l < 1e-3) return null;
-    return { x: dx / l, z: dz / l };
+    if (this.unstickTicks > 0) {
+      this.unstickTicks--;
+      return this.unstickDir;
+    }
+    if (this.stuckTimer > TICK * 0.6) {
+      // sidestep toward the more open side (slightly backing off), then re-route
+      this.stuckTimer = 0;
+      this.stuckLevel++;
+      const px = -uz;
+      const pz = ux;
+      const open = (sx: number, sz: number): number => world.bvh.raycast(self.x, self.y + 0.6, self.z, sx, 0, sz, 2.5)?.t ?? 2.5;
+      const side = open(px, pz) >= open(-px, -pz) ? 1 : -1;
+      const ox = px * side - ux * 0.45;
+      const oz = pz * side - uz * 0.45;
+      const ol = hyp(ox, oz);
+      this.unstickDir = { x: ox / ol, z: oz / ol };
+      this.unstickTicks = Math.round(TICK * 0.35);
+      if (this.stuckLevel >= 2) this.pendingButtons |= Btn.Jump;
+      this.path = [];
+      return this.unstickDir;
+    }
+    return { x: ux, z: uz };
   }
 
   /** Convert a world-space move direction into WASD relative to the current view. */
+  /**
+   * World-space move direction → WASD relative to the view. Only 8 directions
+   * exist, so we alternate between the two nearest ones (sigma-delta
+   * dithering): the average heading then matches the path exactly instead of
+   * snapping to 45° steps, which used to wedge bots on doorway corners.
+   */
   private moveButtons(mx: number, mz: number): number {
     const c = cos(this.aimYaw);
     const s = sin(this.aimYaw);
     const right = mx * c - mz * s;
     const fwd = mx * s + mz * c;
-    let b = 0;
-    if (fwd > 0.38) b |= Btn.Forward;
-    else if (fwd < -0.38) b |= Btn.Back;
-    if (right > 0.38) b |= Btn.Right;
-    else if (right < -0.38) b |= Btn.Left;
-    return b;
+    const q = atan2(right, fwd) / (PI / 4); // 0 = forward, +2 = right
+    const lo = Math.floor(q);
+    this.ditherAcc += q - lo;
+    let k = lo;
+    if (this.ditherAcc >= 1) {
+      this.ditherAcc -= 1;
+      k = lo + 1;
+    }
+    return MOVE_DIRS[((k % 8) + 8) % 8];
   }
 }
 
