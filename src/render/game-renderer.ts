@@ -69,6 +69,8 @@ export class GameRenderer {
     roster: readonly { id: number; team: 0 | 1 }[],
     quality: QualityPreset,
     private features: Features,
+    /** local player's team (enemies get a strong rim highlight); -1 = spectator */
+    viewerTeam: 0 | 1 | -1 = -1,
   ) {
     const scene = new Scene(engine);
     this.scene = scene;
@@ -93,7 +95,7 @@ export class GameRenderer {
     this.buildSkyDome();
     this.quality = quality;
     this.post = new PostStack(scene, cam);
-    this.characters = new CharacterSet(scene, roster);
+    this.characters = new CharacterSet(scene, roster, viewerTeam);
     this.fx = new Fx(scene, this.fxOptions(quality), null, map.bounds);
     this.smoke = new SmokeViz(scene, quality.smokeParticles, features.volumetricSmoke);
     this.syncMap(map);

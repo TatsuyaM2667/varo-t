@@ -11,6 +11,7 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { Scene } from '@babylonjs/core/scene';
 import { VIEWMODEL } from '../config/feel';
+import { SKINS } from '../config/skins';
 import { FX_STYLE, PALETTE } from '../config/visuals';
 import { WEAPONS, type WeaponId } from '../config/weapons';
 
@@ -82,9 +83,20 @@ export class Viewmodel {
     accent.diffuseColor = Color3.FromHexString(team === 0 ? PALETTE.teams.attackers : PALETTE.teams.defenders);
     accent.diffuseColor = accent.diffuseColor.scale(0.55);
     accent.emissiveColor = accent.diffuseColor.scale(0.12);
+    const skin = team === 0 ? SKINS.attackers : SKINS.defenders;
     const glove = new StandardMaterial('vm-glove', scene);
-    glove.diffuseColor = new Color3(0.2, 0.18, 0.17);
-    glove.specularColor = new Color3(0.05, 0.05, 0.05);
+    glove.diffuseColor = Color3.FromHexString(skin.dark);
+    glove.specularColor = new Color3(0.08, 0.08, 0.08);
+    const sleeve = new StandardMaterial('vm-sleeve', scene);
+    sleeve.diffuseColor = Color3.FromHexString(skin.suit);
+    sleeve.specularColor = new Color3(0.05, 0.05, 0.05);
+    const bracer = new StandardMaterial('vm-bracer', scene);
+    bracer.diffuseColor = Color3.FromHexString(skin.armor);
+    bracer.specularColor = new Color3(0.3, 0.3, 0.3);
+    const trim = new StandardMaterial('vm-trim', scene);
+    trim.emissiveColor = Color3.FromHexString(skin.glow);
+    trim.diffuseColor = Color3.Black();
+    trim.disableLighting = true;
     const lens = new StandardMaterial('vm-lens', scene);
     lens.diffuseColor = new Color3(0.1, 0.3, 0.4);
     lens.emissiveColor = new Color3(0.15, 0.6, 0.8);
@@ -109,9 +121,13 @@ export class Viewmodel {
     };
     const hands = (g: TransformNode, foreZ: number): void => {
       box(g, 0.07, 0.11, 0.1, 0, -0.07, -0.02, glove); // right hand on grip
-      box(g, 0.06, 0.06, 0.32, 0.03, -0.11, -0.18, glove); // right forearm
+      box(g, 0.075, 0.075, 0.32, 0.03, -0.11, -0.2, sleeve); // right forearm
+      box(g, 0.085, 0.085, 0.12, 0.03, -0.11, -0.12, bracer);
+      box(g, 0.087, 0.012, 0.03, 0.03, -0.066, -0.12, trim);
       box(g, 0.08, 0.06, 0.1, -0.02, -0.045, foreZ, glove); // left hand
-      box(g, 0.06, 0.06, 0.32, -0.09, -0.08, foreZ - 0.17, glove); // left forearm
+      box(g, 0.075, 0.075, 0.32, -0.09, -0.08, foreZ - 0.19, sleeve); // left forearm
+      box(g, 0.085, 0.085, 0.12, -0.09, -0.08, foreZ - 0.11, bracer);
+      box(g, 0.087, 0.012, 0.03, -0.09, -0.036, foreZ - 0.11, trim);
     };
 
     // Kestrel (rifle)

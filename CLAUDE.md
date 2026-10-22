@@ -52,4 +52,5 @@
 - Tier 0 / Tier 1 / Tier 2 すべて実装済み。各機能は `src/config/features.ts` のフラグで隔離。
 - ボット難易度は `src/config/tuning.generated.ts`（自己対戦の出力）で BASE_BOT_PROFILES に倍率をかけている。
 - 既知の制約: SSAO は WebGL2 のみ（WebGPU では Babylon 9.31 の SSAO2 が描画時に例外）。
+- WebGPU 注意: `scene.ambientColor` を設定すると PBR のマップが真っ黒になる。ParticleSystem.dispose() は共有テクスチャを壊すので dispose(false)。
 - テスト用フック: `window.__game`（app / gfx / input）。E2E はこれで試合開始・入力有効化を行う。

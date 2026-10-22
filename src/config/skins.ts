@@ -24,19 +24,19 @@ export interface Skin {
 
 export const SKINS: { attackers: Skin; defenders: Skin } = {
   attackers: {
-    suit: '#2b2f38',
-    armor: '#4a4f5c',
-    gear: '#6b5a44',
+    suit: '#3d4250',
+    armor: '#5d6372',
+    gear: '#8a7254',
     dark: '#17191e',
     glow: '#ffb648',
     rim: '#ffcf7a',
     helmets: ['hood', 'visor', 'crest'],
   },
   defenders: {
-    suit: '#3a4250',
+    suit: '#5a6478',
     armor: '#e6e9ee',
     gear: '#9aa4b2',
-    dark: '#1d2129',
+    dark: '#2a2f39',
     glow: '#4fd1ff',
     rim: '#8fe3ff',
     helmets: ['visor', 'crest', 'visor'],
@@ -50,6 +50,8 @@ export const CHARACTER_LOOK = {
   allyRim: 0.35,
   /** emissive strength of trims / visor */
   glow: 1.5,
+  /** self-illumination so the side away from the sun doesn't go black (× suit colour) */
+  shadowLift: 0.35,
   /** small per-agent shade variation so bots are distinguishable */
   shadeVariation: 0.12,
 };

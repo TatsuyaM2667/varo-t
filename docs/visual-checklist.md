@@ -20,6 +20,8 @@
 | 13 | タイトルのデモ画面のカメラワーク | 30秒放置 | `app/attract.ts`（距離 3.2 m 等） |
 | 14 | 展示PCでのfps（Low/Medium 60fps が目標） | `?debug` または F3 で左下に表示 | `config/quality.ts` |
 | 15 | 音量バランス（銃声・足音・UI） | ヘッドホンで | `config/audio.ts` |
+| 16 | キャラの色・装備（攻撃側=暗色+琥珀ライン、防衛側=白アーマー+シアン） | 試合・デモ画面 | `config/skins.ts` `SKINS` |
+| 17 | 敵の縁取りの強さ・暗い面の持ち上げ | 撃ち合う | `config/skins.ts` `CHARACTER_LOOK.enemyRim / shadowLift` |
 
 ## このマシン（Radeon 680M）で自動確認済み
 - タイトル・試合・リザルト・リプレイ・キルカム・デモ画面のスクリーンショットを撮って確認

@@ -69,7 +69,8 @@ export class SmokeViz {
     warm.manualEmitCount = 1;
     warm.minLifeTime = warm.maxLifeTime = 0.5;
     warm.start();
-    setTimeout(() => warm.dispose(), 3000);
+    // dispose(false): keep the shared smoke texture alive (destroying it breaks WebGPU submits)
+    setTimeout(() => warm.dispose(false), 3000);
   }
 
   setQuality(particles: number, volumetric: boolean): void {

@@ -95,7 +95,7 @@ export class MatchMode {
     this.world.startMatch();
     this.log = new InputLog(this.options, [0]);
 
-    this.renderer = new GameRenderer(ctx.gfx.engine, this.world.map, this.world.agents, ctx.quality, f);
+    this.renderer = new GameRenderer(ctx.gfx.engine, this.world.map, this.world.agents, ctx.quality, f, 0);
     this.view = new WorldView(this.renderer, f.proceduralAudio ? ctx.audio : null, this.world);
     this.view.localId = 0;
     this.viewmodel = new Viewmodel(this.renderer.scene, this.renderer.camera, 0);
