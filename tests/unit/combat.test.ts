@@ -51,16 +51,30 @@ describe('weapons', () => {
     expect(shots).toBe(Math.round(1 / WEAPONS.rifle.fireInterval));
   });
 
-  it('semi-auto fires once per click', () => {
+  it('semi-auto: a click fires once, holding repeats at the slower holdRepeat rate', () => {
     const { w } = duel();
-    let shots = 0;
     w.step([{ buttons: Btn.Weapon2, yaw: 32768, pitch: 0 }, undefined]);
     for (let i = 0; i < 40; i++) w.step([{ buttons: 0, yaw: 32768, pitch: 0 }, undefined]);
-    for (let i = 0; i < 60; i++) {
-      w.step([{ buttons: Btn.Fire, yaw: 32768, pitch: 0 }, undefined]);
-      shots += w.events.filter((e) => e.type === 'shot').length;
-    }
+    let shots = 0;
+    w.step([{ buttons: Btn.Fire, yaw: 32768, pitch: 0 }, undefined]);
+    shots += w.events.filter((e) => e.type === 'shot').length;
+    for (let i = 0; i < 5; i++) w.step([{ buttons: Btn.Fire, yaw: 32768, pitch: 0 }, undefined]);
     expect(shots).toBe(1);
+    let held = 0;
+    for (let i = 0; i < 59; i++) {
+      w.step([{ buttons: Btn.Fire, yaw: 32768, pitch: 0 }, undefined]);
+      held += w.events.filter((e) => e.type === 'shot').length;
+    }
+    const expected = Math.floor(1 / WEAPONS.sidearm.holdRepeat);
+    expect(held + shots).toBeGreaterThanOrEqual(expected);
+    expect(held + shots).toBeLessThanOrEqual(expected + 1);
+  });
+
+  it('reports why a click could not fire', () => {
+    const w = new World({ seed: 1, roster: [{ team: 0, isBot: false, name: 's' }] });
+    w.startMatch();
+    w.step([{ buttons: Btn.Fire, yaw: 0, pitch: 0 }]);
+    expect(w.events.find((e) => e.type === 'fireBlocked')).toMatchObject({ reason: 'prep' });
   });
 
   it('recoil follows the pattern while spraying', () => {

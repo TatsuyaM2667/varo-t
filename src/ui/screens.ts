@@ -73,7 +73,7 @@ export function controlsGridHtml(): string {
       <div class="key-row">${key('左クリック')} 射撃 / Fire</div>
       <div class="key-row">${key('Space')} ジャンプ / Jump</div>
       <div class="key-row">${key('右クリック')} 覗き込み / Aim</div>
-      <div class="key-row">${key('Ctrl')} or ${key('C')} しゃがみ / Crouch</div>
+      <div class="key-row">${key('C')} / ${key('Ctrl')}<small style="color:var(--dim)">(全画面時)</small> しゃがみ / Crouch</div>
       <div class="key-row">${key('R')} リロード / Reload</div>
       <div class="key-row">${key('Q')} ${BRAND.abilities.smoke}: スモーク / Smoke</div>
       <div class="key-row">${key('1')}${key('2')}${key('3')} ${BRAND.weapons.rifle} / ${BRAND.weapons.sidearm} / ${BRAND.weapons.sniper}</div>
@@ -88,6 +88,7 @@ export function howtoScreen(startable: boolean, onStart: () => void, onBack: () 
   s.innerHTML = `<div class="card">
     <h2>${t('howto')}</h2>
     ${controlsGridHtml()}
+    <div style="margin-top:12px;font-size:13px;color:var(--warn)">🖱 ${t('touchpadHint')}</div>
     <div class="objective">🎯 ${t('objective')}<br><small style="color:var(--dim)">止まって撃つと当たりやすい・連射は反動で上に跳ねるのでマウスを下に引く</small></div>
     ${startable ? `<div class="howto-start">${t('clickToStart')}</div>` : `<div class="actions"><button data-a="back">${t('close')}</button></div>`}
   </div>`;

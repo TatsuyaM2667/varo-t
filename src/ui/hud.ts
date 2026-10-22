@@ -74,6 +74,7 @@ export class Hud {
       <div class="feed"></div>
       <div class="minimap-wrap" data-k="mmWrap"><canvas width="200" height="260"></canvas></div>
       <div class="xhair" data-k="xhair"><i class="h l"></i><i class="h r"></i><i class="v t"></i><i class="v b"></i><i class="dot"></i></div>
+      <div class="notice" data-k="notice"></div>
       <div class="hitmark" data-k="hit"><i></i><i></i><i></i><i></i></div>
       <div class="dmg"></div>
       <div class="scope" data-k="scope"><div class="scope-ring"></div></div>
@@ -180,6 +181,10 @@ export class Hud {
     this.style('fog', 'opacity', m.smokeFog.toFixed(2));
     this.style('hurt', 'opacity', Math.min(1, m.hurt + (m.hp < 30 && !m.dead ? 0.35 : 0)).toFixed(2));
 
+    if (this.noticeTimer > 0) {
+      this.noticeTimer -= dt;
+      if (this.noticeTimer <= 0.3) this.els.notice.style.opacity = Math.max(0, this.noticeTimer / 0.3).toFixed(2);
+    }
     this.hitTimer = Math.max(0, this.hitTimer - dt);
     this.style('hit', 'opacity', (this.hitTimer / 0.25).toFixed(2));
     for (const a of this.dmgArcs) {
@@ -191,6 +196,15 @@ export class Hud {
       this.bannerTimer -= dt;
       if (this.bannerTimer <= 0) this.banner.classList.remove('show');
     }
+  }
+
+  private noticeTimer = 0;
+
+  /** Short message under the crosshair (why a shot didn't happen, etc.). */
+  notice(text: string): void {
+    this.els.notice.textContent = text;
+    this.els.notice.style.opacity = '1';
+    this.noticeTimer = 1.1;
   }
 
   hitmarker(head: boolean, kill: boolean): void {

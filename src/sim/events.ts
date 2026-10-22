@@ -30,6 +30,7 @@ export type SimEvent =
   | { type: 'reload'; agent: number; weapon: WeaponId }
   | { type: 'equip'; agent: number; weapon: WeaponId }
   | { type: 'dry'; agent: number }
+  | { type: 'fireBlocked'; agent: number; reason: 'prep' | 'reload' | 'equip' }
   | { type: 'footstep'; agent: number; material: MaterialTag; x: number; y: number; z: number; loud: boolean }
   | { type: 'jump'; agent: number }
   | { type: 'land'; agent: number; speed: number }

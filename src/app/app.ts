@@ -277,8 +277,9 @@ export class App {
     this.attract?.dispose();
     this.attract = null;
     this.state = 'match';
-    void this.input.lockPointer();
-    this.requestFullscreen();
+    // Fullscreen first, pointer lock after it settles: requesting both at once
+    // makes Chrome reject the lock mid-transition (game stuck on "paused").
+    void this.enterFullscreen().then(() => this.input.lockPointer());
     this.match = new MatchMode(
       this.ctx(),
       this.settings.difficulty,
@@ -289,13 +290,19 @@ export class App {
     this.match.setPaused(!this.input.pointerLocked && !this.params.has('autostart'));
   }
 
-  private requestFullscreen(): void {
+  /** Best-effort fullscreen + Keyboard Lock; resolves when settled (never rejects). */
+  private async enterFullscreen(): Promise<void> {
     if (this.params.get('fs') === '0') return;
     try {
-      if (!document.fullscreenElement) void document.documentElement.requestFullscreen().catch(() => {});
-      void (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.().catch(() => {});
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
     } catch {
-      /* best effort */
+      /* not allowed (no user gesture, iframe…): play windowed */
+    }
+    try {
+      await (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.();
+      this.input.keyboardLocked = true;
+    } catch {
+      this.input.keyboardLocked = false;
     }
   }
 

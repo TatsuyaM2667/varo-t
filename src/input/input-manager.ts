@@ -41,6 +41,8 @@ export class InputManager {
   /** wall-clock ms of the last user activity (for the idle watchdog) */
   lastActivity = performance.now();
   readonly heldCodes = new Set<string>();
+  /** set when navigator.keyboard.lock() succeeded (Ctrl+W etc. are then captured) */
+  keyboardLocked = false;
 
   constructor(private readonly target: HTMLElement) {
     for (const [action, codes] of Object.entries(INPUT.keys) as [Action, readonly string[]][]) {
@@ -72,6 +74,21 @@ export class InputManager {
   }
 
   async lockPointer(): Promise<void> {
+    if (this.pointerLocked) return;
+    // Chrome rejects lock requests during a fullscreen transition and for ~1 s after the
+    // user pressed Esc; retry once after that window (activation is still valid).
+    const retry = (): void => {
+      document.removeEventListener('pointerlockerror', retry);
+      setTimeout(() => {
+        if (!this.pointerLocked) void this.lockOnce();
+      }, 1100);
+    };
+    document.addEventListener('pointerlockerror', retry, { once: true });
+    await this.lockOnce();
+    setTimeout(() => document.removeEventListener('pointerlockerror', retry), 2000);
+  }
+
+  private async lockOnce(): Promise<void> {
     if (this.pointerLocked) return;
     try {
       // Raw (unaccelerated) mouse where supported.
@@ -110,9 +127,21 @@ export class InputManager {
     this.lastActivity = performance.now();
   }
 
+  /**
+   * Ctrl only crouches when Keyboard Lock is active in fullscreen: otherwise
+   * Ctrl+W (crouch + forward) would close the browser tab. C always works.
+   */
+  private ctrlUsable(): boolean {
+    return this.keyboardLocked && !!document.fullscreenElement;
+  }
+
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.markActivity();
     this.heldCodes.add(e.code);
+    // block browser shortcuts (Ctrl+S save, Ctrl+D bookmark, …) while playing
+    if (this.enabled && (e.ctrlKey || e.altKey || e.metaKey)) e.preventDefault();
+    const isCtrl = e.code === 'ControlLeft' || e.code === 'ControlRight';
+    if (isCtrl && !this.ctrlUsable()) return;
     const btn = this.codeToButton.get(e.code);
     if (btn !== undefined && this.enabled) {
       e.preventDefault();

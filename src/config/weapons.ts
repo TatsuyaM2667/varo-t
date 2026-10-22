@@ -11,6 +11,12 @@ export interface WeaponDef {
   id: WeaponId;
   slot: 1 | 2 | 3;
   automatic: boolean;
+  /**
+   * Semi-autos: keep firing while the button is held, at this interval (s).
+   * Casual players hold the button; without this they think the gun jammed.
+   * 0 = strict one shot per click.
+   */
+  holdRepeat: number;
   /** seconds between shots */
   fireInterval: number;
   magSize: number;
@@ -96,6 +102,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     id: 'sidearm',
     slot: 2,
     automatic: false,
+    holdRepeat: 0.24,
     fireInterval: 0.15,
     magSize: 12,
     reserve: 48,
@@ -113,6 +120,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     id: 'rifle',
     slot: 1,
     automatic: true,
+    holdRepeat: 0,
     fireInterval: 0.1,
     magSize: 25,
     reserve: 75,
@@ -130,6 +138,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     id: 'sniper',
     slot: 3,
     automatic: false,
+    holdRepeat: 1.5,
     fireInterval: 1.5,
     magSize: 5,
     reserve: 15,

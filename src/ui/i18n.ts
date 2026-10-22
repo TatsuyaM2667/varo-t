@@ -48,6 +48,11 @@ const DICT = {
   accuracy: { ja: '命中率', en: 'Accuracy' },
   damage: { ja: 'ダメージ', en: 'Damage' },
   noScores: { ja: 'まだ記録がありません', en: 'No scores yet' },
+  blockedPrep: { ja: '準備フェーズ中は撃てません', en: "Can't fire during the buy phase" },
+  blockedReload: { ja: 'リロード中…', en: 'Reloading…' },
+  blockedEquip: { ja: '武器を構えています…', en: 'Equipping…' },
+  emptyMag: { ja: '弾切れ — R でリロード', en: 'Empty — press R' },
+  touchpadHint: { ja: 'タッチパッドはキー入力中に無効になる場合があります。マウスの使用を推奨します', en: 'Touchpads may be disabled while typing — use a mouse' },
 } as const;
 
 export type I18nKey = keyof typeof DICT;

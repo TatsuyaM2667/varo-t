@@ -112,6 +112,8 @@ export interface TickResult {
   reloaded: boolean;
   /** dry fire (empty mag) */
   empty: boolean;
+  /** fire was pressed but the weapon could not shoot (for HUD feedback) */
+  blocked: 'prep' | 'reload' | 'equip' | null;
 }
 
 /**
@@ -121,7 +123,7 @@ export interface TickResult {
  */
 export function tickWeapon(w: WeaponState, fireHeld: boolean, firePressed: boolean, adsHeld: boolean, canFire: boolean): TickResult {
   const d = def(w);
-  const res: TickResult = { fired: false, reloaded: false, empty: false };
+  const res: TickResult = { fired: false, reloaded: false, empty: false, blocked: null };
   w.sinceShot += DT;
   if (w.cooldown > 0) w.cooldown -= DT;
   if (w.equip > 0) w.equip = Math.max(0, w.equip - DT);
@@ -153,7 +155,14 @@ export function tickWeapon(w: WeaponState, fireHeld: boolean, firePressed: boole
   }
   if (!fireHeld) w.triggerHeld = false;
 
-  const wantsFire = d.automatic ? fireHeld : firePressed || (fireHeld && !w.triggerHeld);
+  // semi-autos re-fire while held once `holdRepeat` has passed since the last shot
+  const repeat = !d.automatic && d.holdRepeat > 0 && fireHeld && w.sinceShot >= d.holdRepeat;
+  const wantsFire = d.automatic ? fireHeld : firePressed || repeat || (fireHeld && !w.triggerHeld);
+  if (wantsFire && firePressed) {
+    if (!canFire) res.blocked = 'prep';
+    else if (w.reload > 0) res.blocked = 'reload';
+    else if (w.equip > 0) res.blocked = 'equip';
+  }
   if (!wantsFire || !canFire || w.equip > 0 || w.reload > 0 || w.cooldown > 0) return res;
 
   const a = w.ammo[w.current];

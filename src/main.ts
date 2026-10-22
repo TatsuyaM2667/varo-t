@@ -13,9 +13,19 @@ async function boot(): Promise<void> {
   const input = new InputManager(canvas);
   const app = new App(gfx, input, ui, params);
 
-  // Exhibition safety: any uncaught error returns to the title instead of freezing.
-  window.addEventListener('error', (e) => app.recover(e.error ?? e.message));
-  window.addEventListener('unhandledrejection', (e) => app.recover(e.reason));
+  // Exhibition safety: uncaught errors from the game return to the title
+  // instead of freezing. Harmless browser noise (ResizeObserver, extensions,
+  // rejected pointer-lock / fullscreen / audio requests) is only logged.
+  window.addEventListener('error', (e) => {
+    const fromPage = !e.filename || e.filename.startsWith(location.origin);
+    if (!fromPage || isBenign(e.message)) return void console.warn('[ignored error]', e.message);
+    app.recover(e.error ?? e.message);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = e.reason instanceof Error ? `${e.reason.name}: ${e.reason.message}` : String(e.reason);
+    if (isBenign(msg)) return void console.warn('[ignored rejection]', msg);
+    app.recover(e.reason);
+  });
   gfx.engine.onContextLostObservable?.add(() => setTimeout(() => location.reload(), 1500));
 
   canvas.addEventListener('click', () => {
@@ -33,6 +43,11 @@ async function boot(): Promise<void> {
     }
   });
   window.addEventListener('resize', () => gfx.engine.resize());
+}
+
+/** Errors that are not game bugs and must not trigger the recovery screen. */
+export function isBenign(message: string | undefined): boolean {
+  return /ResizeObserver loop|^Script error\.?$|pointer ?lock|exited the lock|NotAllowedError|AbortError|fullscreen|keyboard\.lock|play\(\) request|The AudioContext/i.test(message ?? '');
 }
 
 boot().catch((err: unknown) => {

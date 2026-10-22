@@ -278,6 +278,7 @@ export class World {
       const reloadingBefore = w.reload > 0;
       const res = tickWeapon(w, has(input, Btn.Fire), (pressed & Btn.Fire) !== 0, has(input, Btn.Ads), combat && !frozen && a.dashTicks === 0);
       if (res.empty) this.events.push({ type: 'dry', agent: a.id });
+      if (res.blocked && !a.isBot) this.events.push({ type: 'fireBlocked', agent: a.id, reason: res.blocked });
       if (!reloadingBefore && w.reload > 0 && !(pressed & Btn.Reload)) this.events.push({ type: 'reload', agent: a.id, weapon: w.current });
       if (res.fired) this.fire(a);
     }

@@ -201,6 +201,13 @@ export class MatchMode {
           this.stopKillcam();
         } else if (e.phase === 'live') au?.ui('roundStart');
         break;
+      case 'fireBlocked':
+        if (e.agent === 0 && w === this.world)
+          this.hud.notice(e.reason === 'prep' ? t('blockedPrep') : e.reason === 'reload' ? t('blockedReload') : t('blockedEquip'));
+        break;
+      case 'dry':
+        if (e.agent === 0 && w === this.world) this.hud.notice(t('emptyMag'));
+        break;
       case 'captureStart':
         au?.ui('capture');
         break;
