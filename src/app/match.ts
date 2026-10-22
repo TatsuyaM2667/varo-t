@@ -1,14 +1,14 @@
 import type { AudioEngine } from '../audio/audio-engine';
 import { ABILITIES } from '../config/abilities';
-import type { Difficulty } from '../config/bots';
 import { BOT_NAMES } from '../config/bots';
+import type { StageDef } from '../sim/map/registry';
 import { CAMERA_FEEL } from '../config/feel';
 import type { Features } from '../config/features';
 import { INPUT } from '../config/input';
 import { MOVEMENT } from '../config/movement';
 import type { QualityPreset } from '../config/quality';
 import { RULES } from '../config/rules';
-import { LIGHTING_MOODS, PALETTE } from '../config/visuals';
+import { PALETTE } from '../config/visuals';
 import type { InputManager } from '../input/input-manager';
 import type { EngineHandle } from '../render/engine';
 import { GameRenderer } from '../render/game-renderer';
@@ -79,16 +79,19 @@ export class MatchMode {
 
   constructor(
     private readonly ctx: ModeContext,
-    difficulty: Difficulty,
+    private readonly stage: StageDef,
+    enemies: number,
     private readonly onFinish: (r: MatchResult) => void,
     private readonly onQuit: () => void,
     private readonly onSettings: () => void = () => {},
   ) {
     const f = ctx.features;
     const roster: AgentSpec[] = [{ team: 0, isBot: false, name: 'YOU', hpBonus: RULES.playerHpBonus }];
-    for (let i = 0; i < RULES.enemyTeamSize; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i % BOT_NAMES.length], difficulty });
+    const difficulty = stage.difficulty;
+    for (let i = 0; i < enemies; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i % BOT_NAMES.length], difficulty });
     this.options = {
       seed: (Date.now() ^ (performance.now() * 1000)) >>> 0,
+      mapId: stage.map,
       roster,
       features: { destructibles: f.destructibles, seededMap: f.seededMap, utilityAi: f.botUtilityAi },
     };
@@ -159,7 +162,7 @@ export class MatchMode {
   };
 
   private applyMood(round: number): void {
-    const moods = LIGHTING_MOODS;
+    const moods = this.renderer.moods;
     this.renderer.setMood(this.ctx.features.timeOfDay ? moods[round % moods.length] : moods[0]);
   }
 
@@ -440,7 +443,9 @@ export class MatchMode {
       roundsLost: w.match.score[1],
       won: w.match.winner === 0,
       timeLeftOnWins: this.timeLeftOnWins,
-      difficulty: (this.options.roster[1] as { difficulty?: string }).difficulty ?? 'easy',
+      difficulty: this.stage.difficulty,
+      enemies: this.options.roster.length - 1,
+      stage: this.stage.map,
     };
     this.onFinish({ summary, log: this.log, history: w.match.history.map((h) => ({ ...h })), playerName: me.name });
   }

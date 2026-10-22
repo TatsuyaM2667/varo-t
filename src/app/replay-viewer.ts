@@ -1,5 +1,4 @@
 import { MOVEMENT } from '../config/movement';
-import { LIGHTING_MOODS } from '../config/visuals';
 import { GameRenderer } from '../render/game-renderer';
 import { InputLog, RoundReplay } from '../sim/replay/input-log';
 import { t } from '../ui/i18n';
@@ -33,7 +32,7 @@ export class ReplayViewer {
     this.replay = new RoundReplay(log, round);
     this.total = log.ticks(round);
     this.renderer = new GameRenderer(ctx.gfx.engine, this.replay.world.map, this.replay.world.agents, ctx.quality, ctx.features);
-    this.renderer.setMood(ctx.features.timeOfDay ? LIGHTING_MOODS[round % LIGHTING_MOODS.length] : LIGHTING_MOODS[0]);
+    this.renderer.setMood(ctx.features.timeOfDay ? this.renderer.moods[round % this.renderer.moods.length] : this.renderer.moods[0]);
     this.view = new WorldView(this.renderer, ctx.features.proceduralAudio ? ctx.audio : null, this.replay.world);
     this.bar = document.createElement('div');
     this.bar.className = 'replay-bar';

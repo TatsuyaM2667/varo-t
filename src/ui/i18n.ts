@@ -62,6 +62,10 @@ const DICT = {
   headshots: { ja: "ヘッドショット", en: "Headshots" },
   accuracy: { ja: "命中率", en: "Accuracy" },
   damage: { ja: "ダメージ", en: "Damage" },
+  enemies: { ja: "敵の数", en: "Enemies" },
+  stageDefault: { ja: "ステージ標準", en: "Stage default" },
+  enemiesShort: { ja: "敵", en: "enemies" },
+  stage: { ja: "ステージ", en: "Stage" },
   noScores: { ja: "まだ記録がありません", en: "No scores yet" },
   blockedPrep: {
     ja: "準備フェーズ中は撃てません",

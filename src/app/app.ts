@@ -14,6 +14,7 @@ import {
   settingsScreen,
   titleScreen,
 } from "../ui/screens";
+import { STAGES } from "../sim/map/registry";
 import { AttractMode } from "./attract";
 import {
   computeScore,
@@ -213,6 +214,16 @@ export class App {
     this.attract = new AttractMode(this.ctx(), this.features.attractMode);
   }
 
+  /**
+   * Dispose the title demo after the current frame has been submitted: under
+   * WebGPU, destroying its render targets mid-frame invalidates that frame.
+   */
+  private retireAttract(): void {
+    const old = this.attract;
+    this.attract = null;
+    if (old) this.gfx.engine.onEndFrameObservable.addOnce(() => old.dispose());
+  }
+
   private disposeModes(): void {
     this.match?.dispose();
     this.match = null;
@@ -233,8 +244,9 @@ export class App {
         play: () => this.goHowto(true),
         howto: () => this.goHowto(false),
         settings: () => this.goSettings(),
-        difficulty: (d) => {
-          this.settings.difficulty = d;
+        stage: (i) => {
+          this.settings.stage = i;
+          this.settings.difficulty = STAGES[i].difficulty;
           saveSettings(this.kv, this.settings);
           this.audio?.ui("click");
         },
@@ -301,8 +313,7 @@ export class App {
             this.features = this.withSafeMode(
               resolveFeatures(this.quality.features, this.params.get("f")),
             );
-            this.attract?.dispose();
-            this.attract = null;
+            this.retireAttract();
             this.ensureAttract();
           }
           if (qualityChanged && fromMatch) {
@@ -327,15 +338,16 @@ export class App {
 
   private startMatch(): void {
     this.setScreen(null);
-    this.attract?.dispose();
-    this.attract = null;
+    this.retireAttract();
     this.state = "match";
     // Fullscreen first, pointer lock after it settles: requesting both at once
     // makes Chrome reject the lock mid-transition (game stuck on "paused").
     void this.enterFullscreen().then(() => this.input.lockPointer());
+    const stage = STAGES[this.settings.stage] ?? STAGES[0];
     this.match = new MatchMode(
       this.ctx(),
-      this.settings.difficulty,
+      stage,
+      this.settings.enemies || stage.enemies,
       (r) => this.onMatchEnd(r),
       () => this.goTitle(),
       () => this.goSettings(true),
@@ -406,6 +418,7 @@ export class App {
                 kills: r.summary.stats.kills,
                 won: r.summary.won,
                 difficulty: r.summary.difficulty,
+                stage: r.summary.stage,
                 date: localDate(),
               });
             }
@@ -418,8 +431,7 @@ export class App {
   private startReplay(round: number): void {
     const r = this.lastResult;
     if (!r) return;
-    this.attract?.dispose();
-    this.attract = null;
+    this.retireAttract();
     this.state = "replay";
     this.setScreen(null);
     this.replay = new ReplayViewer(this.ctx(), r.log, round, () =>
@@ -492,8 +504,7 @@ export class App {
     setTimeout(() => {
       try {
         this.disposeModes();
-        this.attract?.dispose();
-        this.attract = null;
+        this.retireAttract();
       } catch (e) {
         console.error(e);
       }

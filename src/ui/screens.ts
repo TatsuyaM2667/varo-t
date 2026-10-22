@@ -1,6 +1,7 @@
 import type { Settings } from "../app/settings";
 import type { HighScore, ScoreBreakdown, MatchSummary } from "../app/highscore";
 import { BRAND } from "../config/brand";
+import { STAGES } from "../sim/map/registry";
 import { INPUT } from "../config/input";
 import type { InputManager } from "../input/input-manager";
 import {
@@ -44,7 +45,7 @@ export interface TitleHandlers {
   play(): void;
   howto(): void;
   settings(): void;
-  difficulty(d: Settings["difficulty"]): void;
+  stage(index: number): void;
   hover(): void;
 }
 
@@ -63,12 +64,10 @@ export function titleScreen(
       <button data-a="howto">${t("howto")}</button>
       <button data-a="settings">${t("settings")}</button>
     </div>
-    <div class="diff">${(["easy", "normal", "hard"] as const)
-      .map(
-        (d) =>
-          `<button data-d="${d}" class="${settings.difficulty === d ? "on" : ""}">${t(d)}</button>`,
-      )
-      .join("")}</div>
+    <div class="stages">${STAGES.map(
+      (st, i) =>
+        `<button data-st="${i}" class="stage${settings.stage === i ? " on" : ""}"><b>${esc(st.title[settings.lang])}</b><span class="stage-meta">${t(st.difficulty)} ・ ${t("enemiesShort")} ${settings.enemies || st.enemies}</span><small>${esc(st.blurb[settings.lang])}</small></button>`,
+    ).join("")}</div>
     <div class="title-board"><h3>${t("ranking")}</h3>${
       scores.length
         ? scores
@@ -79,16 +78,16 @@ export function titleScreen(
             .join("")
         : `<div style="color:var(--dim)">${t("noScores")}</div>`
     }</div>
-    <div class="title-foot">${BRAND.mapName} · WebGPU / WebGL2 · Babylon.js</div>`;
+    <div class="title-foot">WebGPU / WebGL2 · Babylon.js</div>`;
   s.addEventListener("click", (ev) => {
     const btn = (ev.target as HTMLElement).closest("button");
     if (!btn) return;
     if (btn.dataset.a === "play") h.play();
     else if (btn.dataset.a === "howto") h.howto();
     else if (btn.dataset.a === "settings") h.settings();
-    else if (btn.dataset.d) {
-      h.difficulty(btn.dataset.d as Settings["difficulty"]);
-      s.querySelectorAll("[data-d]").forEach((x) =>
+    else if (btn.dataset.st) {
+      h.stage(Number(btn.dataset.st));
+      s.querySelectorAll("[data-st]").forEach((x) =>
         x.classList.toggle("on", x === btn),
       );
     }
@@ -181,14 +180,10 @@ export function settingsScreen(
       ["high", "High"],
       ["ultra", "Ultra"],
     ])}<span></span></div>
-    <div class="settings-row"><span>${t("difficulty")}</span>${seg(
-      "difficulty",
-      [
-        ["easy", t("easy")],
-        ["normal", t("normal")],
-        ["hard", t("hard")],
-      ],
-    )}<span></span></div>
+    <div class="settings-row"><span>${t("enemies")}</span>${seg("enemies", [
+      ["0", t("stageDefault")],
+      ...[3, 4, 5, 6, 7, 8].map((n): [string, string] => [String(n), String(n)]),
+    ])}<span></span></div>
     <div class="settings-row"><span>${t("language")}</span>${seg("lang", [
       ["ja", "日本語"],
       ["en", "English"],
