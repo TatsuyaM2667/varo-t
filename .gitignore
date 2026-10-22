@@ -1,7 +1,39 @@
+# 依存パッケージ
 node_modules/
+
+# ビルド成果物（npm run build / npm run pack:offline で再生成できる）
 dist/
 *.zip
+*.tsbuildinfo
+.vite/
+
+# テスト・計測の出力
 test-results/
 playwright-report/
+blob-report/
+playwright/.cache/
+coverage/
+
+# Cloudflare / wrangler のローカル状態・秘密情報
 .wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# ログ
+*.log
+npm-debug.log*
+
+# エディタ・OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code のローカル設定（個人用）
+.claude/settings.local.json
