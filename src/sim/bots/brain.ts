@@ -9,7 +9,8 @@ import type { NoiseSource } from '../events';
 import { Btn, type InputFrame } from '../input-frame';
 import type { World } from '../world';
 import type { NavPoint } from './nav';
-import { DEFENSIVE_SMOKES, ENTRANCES, type Entrance, POSTS, type Post, ROUTES, type Route, nearestEntrance } from './tactics';
+import { Rng as TeamRng } from '../core/rng';
+import { type Post, type Route, type Tactics, nearestEntrance } from './tactics';
 
 const TICK = MOVEMENT.tickRate;
 const DT = 1 / TICK;
@@ -264,19 +265,20 @@ class Brain implements BotBrain {
   private plan(world: World, self: Agent): void {
     const mates = world.agents.filter((a) => a.team === self.team);
     const idx = mates.indexOf(self);
+    const t = world.map.tactics;
     if (self.team === 1) {
-      // defenders: spread over entrances; coordination decides crossfire pairing
-      const ent = ENTRANCES[(idx + world.round.index) % 3];
-      const pair = POSTS[ent];
-      this.post = pair[this.rng.float() < 0.5 ? 0 : 1];
+      // defenders: every bot gets its own post (no two stand on the same spot)
+      const order = defenderPosts(t, mates.length, new TeamRng(world.roundSeed(world.round.index) ^ 0xd3f3));
+      this.post = order[idx % order.length];
       // one defender takes the long-range rifle
       this.setSlot(idx === 1 && this.rng.float() < 0.7 ? 3 : 1);
     } else {
       // attackers: coordinated teams stack one route, others split
       const shared = this.rngShared(world, self.team);
       const stack = shared < this.p.coordination;
-      const r = stack ? Math.floor(shared * 1000) % 3 : (idx + Math.floor(this.rng.float() * 3)) % 3;
-      this.route = ROUTES[r];
+      const n = t.routes.length;
+      const r = stack ? Math.floor(shared * 1000) % n : (idx + Math.floor(this.rng.float() * n)) % n;
+      this.route = t.routes[r];
       this.routeIdx = 0;
       this.setSlot(1);
     }
@@ -445,11 +447,12 @@ class Brain implements BotBrain {
       scores.push(['hold', 0.42]);
       // rotate toward a contested entrance when a teammate fights there
       const hot = this.hotEntrance(world);
-      if (hot && this.post && hot !== this.post.entrance && this.rng.float() < this.p.coordination) {
-        this.post = POSTS[hot][this.post === POSTS[this.post.entrance][0] ? 1 : 0];
+      if (hot && this.post && !this.post.forward && hot.id !== this.post.entrance && this.rng.float() < this.p.coordination) {
+        const options = world.map.tactics.posts.filter((p) => p.entrance === hot.id && !p.forward);
+        if (options.length) this.post = options[(self.id + world.round.index) % options.length];
         // defensive smoke to stall the push
         if (!this.smokeUsedPlan && self.smokeCharges > 0 && this.rng.float() < this.p.coordination) {
-          this.smokeAim = DEFENSIVE_SMOKES[hot];
+          this.smokeAim = hot.smoke;
           this.smokeUsedPlan = true;
         }
       }
@@ -478,14 +481,15 @@ class Brain implements BotBrain {
   }
 
   /** Entrance where a teammate recently saw/heard enemies. */
-  private hotEntrance(world: World): Entrance | null {
+  private hotEntrance(world: World) {
     let latest: Memory | null = null;
     for (const m of this.memory.values()) if (!latest || m.tick > latest.tick) latest = m;
     if (this.heard && (!latest || this.heard.tick > latest.tick)) latest = this.heard;
     if (!latest || world.round.tick - latest.tick > TICK * 2) return null;
-    // only react to enemies already past mid-map
-    if (latest.z < 0) return null;
-    return nearestEntrance(latest.x, latest.z);
+    // only react to enemies already close to one of the site entrances
+    const e = nearestEntrance(world.map.tactics, latest.x, latest.z);
+    if (!e || Math.sqrt((e.x - latest.x) ** 2 + (e.z - latest.z) ** 2) > 22) return null;
+    return e;
   }
 
   private freshestMemory(world: World): Memory | null {
@@ -664,4 +668,35 @@ export function throwPitch(self: Agent, target: { x: number; z: number }): numbe
     }
   }
   return best;
+}
+
+/**
+ * Post assignment for a defending team: about 40 % of defenders hold forward
+ * posts (meeting attackers on the way in), the rest are spread round-robin
+ * over the site entrances so every entrance is covered before any doubles up.
+ * The order is shuffled per round with a team-shared RNG.
+ */
+export function defenderPosts(t: Tactics, defenders: number, rng: TeamRng): Post[] {
+  const shuffle = <T>(a: T[]): T[] => {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  const site = t.posts.filter((p) => !p.forward);
+  const fwd = shuffle(t.posts.filter((p) => p.forward));
+  const entrances = shuffle([...new Set(site.map((p) => p.entrance))]);
+  const perEntrance = entrances.map((e) => shuffle(site.filter((p) => p.entrance === e)));
+  const siteOrder: Post[] = [];
+  for (let k = 0; siteOrder.length < site.length; k++) {
+    for (const list of perEntrance) if (k < list.length) siteOrder.push(list[k]);
+  }
+  const nFwd = fwd.length ? Math.min(fwd.length, Math.floor(defenders * 0.4)) : 0;
+  const out: Post[] = [];
+  for (let i = 0; i < defenders; i++) {
+    if (i < nFwd) out.push(fwd[i]);
+    else out.push(siteOrder[(i - nFwd) % siteOrder.length] ?? fwd[i % Math.max(1, fwd.length)]);
+  }
+  return out;
 }

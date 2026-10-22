@@ -15,6 +15,9 @@ export interface Collider extends AABB {
   material: MaterialTag;
   /** hit points when destructible (Tier 2), undefined = indestructible */
   breakHp?: number;
+  /** render-only: colour tint (hex) and architectural role */
+  tint?: string;
+  style?: 'building' | 'lintel' | 'roof' | 'platform' | 'pillar' | 'prop';
 }
 
 export function aabb(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): AABB {

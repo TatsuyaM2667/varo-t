@@ -1,3 +1,4 @@
+import { type Tactics, YARD_TACTICS } from '../bots/tactics';
 import type { Collider, MaterialTag } from '../physics/aabb';
 
 /**
@@ -53,7 +54,31 @@ export interface SpawnPoint {
   yaw: number;
 }
 
+/** Render-only decoration that has no (or only a simple) collider. */
+export type PropKind = 'tree' | 'stall' | 'barrels' | 'lamp' | 'banner';
+
+export interface MapProp {
+  kind: PropKind;
+  x: number;
+  y: number;
+  z: number;
+  /** yaw in radians */
+  rot: number;
+  tint?: string;
+}
+
+export type FloorKind = 'plain' | 'cobble' | 'tile' | 'metal' | 'grass' | 'site';
+
+/** Visual description consumed by the renderer (the sim ignores it). */
+export interface MapVisual {
+  theme: string;
+  floors: { minX: number; minZ: number; maxX: number; maxZ: number; color: string; kind: FloorKind }[];
+  props: MapProp[];
+}
+
 export interface MapData {
+  /** registry id (see map/registry.ts) */
+  id: string;
   name: string;
   /** identity of the layout (renderers rebuild meshes only when it changes) */
   key: string;
@@ -64,6 +89,10 @@ export interface MapData {
   siteZone: Zone;
   relay: { x: number; y: number; z: number };
   spawns: { attackers: SpawnPoint[]; defenders: SpawnPoint[] };
+  tactics: Tactics;
+  /** seconds per round on this map (defaults to RULES.roundTime) */
+  roundTime?: number;
+  visual?: MapVisual;
 }
 
 const CELL = 2;
@@ -219,8 +248,10 @@ export function buildMeridianYard(cover: readonly BoxDef[] = COVER_SLOTS, key = 
   const yawNorth = 0;
   const yawSouth = 32768;
   return {
+    id: 'yard',
     name: 'Meridian Yard',
     key,
+    tactics: YARD_TACTICS,
     colliders,
     bounds: { minX, minZ, maxX, maxZ },
     wallHeight: WALL_H,

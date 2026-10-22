@@ -201,7 +201,7 @@ export class MatchMode {
         const won = e.winner === 0;
         if (won) {
           const h = w.match.history[w.match.history.length - 1];
-          this.timeLeftOnWins += Math.max(0, RULES.roundTime - (h.duration - RULES.prepTime));
+          this.timeLeftOnWins += Math.max(0, w.roundTime - (h.duration - RULES.prepTime));
         }
         const reason = e.reason === 'elimination' ? t('elimination') : e.reason === 'capture' ? t('captureReason') : t('timeReason');
         this.hud.showBanner(won ? t('roundWon') : t('roundLost'), reason, won ? PALETTE.teams.attackers : '#ff5c6c', 3);

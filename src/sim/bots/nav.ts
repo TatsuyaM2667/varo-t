@@ -15,6 +15,9 @@ export interface NavPoint {
   z: number;
 }
 
+/** highest floor surface (9 levels × 0.4 m) */
+const MAX_FLOOR = 3.65;
+
 const NEIGHBOURS: [number, number, number][] = [
   [1, 0, 1],
   [-1, 0, 1],
@@ -70,10 +73,8 @@ export class NavGrid {
       for (let c = 0; c < this.cols; c++) {
         const x = this.minX + (c + 0.5) * this.cell;
         const z = this.minZ + (r + 0.5) * this.cell;
-        const hit = this.bvh.raycast(x, 2.2, z, 0, -1, 0, 4);
-        if (!hit) continue;
-        const y = 2.2 - hit.t;
-        if (y > 1.6) continue;
+        const y = this.floorAt(x, z);
+        if (y === null) continue;
         probe.x = x;
         probe.y = y + 0.02;
         probe.z = z;
@@ -99,6 +100,24 @@ export class NavGrid {
       }
       comp++;
     }
+  }
+
+  /**
+   * Height of the walkable floor at (x, z), or null. Floors go up to 3.6 m
+   * (level 9); anything higher is a roof, lintel or wall top, so the probe
+   * continues below it.
+   */
+  private floorAt(x: number, z: number): number | null {
+    let from = MAX_FLOOR + 1;
+    for (let k = 0; k < 4; k++) {
+      const hit = this.bvh.raycast(x, from, z, 0, -1, 0, from + 2);
+      if (!hit) return null;
+      const top = from - hit.t;
+      if (top <= MAX_FLOOR) return top;
+      from = hit.collider.minY - 0.01;
+      if (from < 0) return null;
+    }
+    return null;
   }
 
   private forEachNeighbour(i: number, fn: (nb: number, cost: number) => void): void {
