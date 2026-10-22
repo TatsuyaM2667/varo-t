@@ -1,15 +1,15 @@
-import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
-import { Texture } from '@babylonjs/core/Materials/Textures/texture';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
-import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
-import { CreateCapsule } from '@babylonjs/core/Meshes/Builders/capsuleBuilder';
-import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
-import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
-import { Mesh } from '@babylonjs/core/Meshes/mesh';
-import type { Material } from '@babylonjs/core/Materials/material';
-import type { Scene } from '@babylonjs/core/scene';
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
+import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
+import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { Material } from "@babylonjs/core/Materials/material";
+import type { Scene } from "@babylonjs/core/scene";
 
 /**
  * One primitive of a rigid body part. Sizes are metres:
@@ -17,7 +17,7 @@ import type { Scene } from '@babylonjs/core/scene';
  *  cyl [diameterTop, length, diameterBottom] along Z
  */
 export interface Piece {
-  shape: 'box' | 'sphere' | 'capsule' | 'cyl';
+  shape: "box" | "sphere" | "capsule" | "cyl";
   size: number[];
   pos?: [number, number, number];
   rot?: [number, number, number];
@@ -30,23 +30,52 @@ export const c3 = (hex: string): Color3 => Color3.FromHexString(hex);
  * Bakes primitives into one mesh with per-vertex colours, so a whole body
  * part (e.g. a torso with plates, pouches and backpack) is one draw call.
  */
-export function buildPart(scene: Scene, name: string, pieces: readonly Piece[], material: Material): Mesh {
+export function buildPart(
+  scene: Scene,
+  name: string,
+  pieces: readonly Piece[],
+  material: Material,
+): Mesh {
   const parts: Mesh[] = [];
   for (const p of pieces) {
     let m: Mesh;
     const s = p.size;
     switch (p.shape) {
-      case 'box':
+      case "box":
         m = CreateBox(name, { width: s[0], height: s[1], depth: s[2] }, scene);
         break;
-      case 'sphere':
-        m = CreateSphere(name, { diameterX: s[0], diameterY: s[1], diameterZ: s[2], segments: 8 }, scene);
+      case "sphere":
+        m = CreateSphere(
+          name,
+          { diameterX: s[0], diameterY: s[1], diameterZ: s[2], segments: 8 },
+          scene,
+        );
         break;
-      case 'capsule':
-        m = CreateCapsule(name, { radius: s[0], height: s[1], tessellation: 10, subdivisions: 1, capSubdivisions: 3, orientation: Vector3.Forward() }, scene);
+      case "capsule":
+        m = CreateCapsule(
+          name,
+          {
+            radius: s[0],
+            height: s[1],
+            tessellation: 10,
+            subdivisions: 1,
+            capSubdivisions: 3,
+            orientation: Vector3.Forward(),
+          },
+          scene,
+        );
         break;
-      case 'cyl':
-        m = CreateCylinder(name, { diameterTop: s[0], height: s[1], diameterBottom: s[2] ?? s[0], tessellation: 12 }, scene);
+      case "cyl":
+        m = CreateCylinder(
+          name,
+          {
+            diameterTop: s[0],
+            height: s[1],
+            diameterBottom: s[2] ?? s[0],
+            tessellation: 12,
+          },
+          scene,
+        );
         m.rotation.x = Math.PI / 2;
         m.bakeCurrentTransformIntoVertices();
         break;
@@ -82,9 +111,15 @@ export function detailTexture(scene: Scene): DynamicTexture {
   const hit = detailCache.get(scene);
   if (hit) return hit;
   const n = 128;
-  const t = new DynamicTexture('kit-detail', { width: n, height: n }, scene, true, Texture.TRILINEAR_SAMPLINGMODE);
+  const t = new DynamicTexture(
+    "kit-detail",
+    { width: n, height: n },
+    scene,
+    true,
+    Texture.TRILINEAR_SAMPLINGMODE,
+  );
   const ctx = t.getContext() as CanvasRenderingContext2D;
-  ctx.fillStyle = '#ececec';
+  ctx.fillStyle = "#ececec";
   ctx.fillRect(0, 0, n, n);
   let seed = 99;
   const rnd = (): number => {
@@ -96,10 +131,10 @@ export function detailTexture(scene: Scene): DynamicTexture {
     ctx.fillStyle = `rgb(${v},${v},${v})`;
     ctx.fillRect(Math.floor(rnd() * n), Math.floor(rnd() * n), 2, 2);
   }
-  ctx.strokeStyle = 'rgba(40,40,40,0.55)';
+  ctx.strokeStyle = "rgba(40,40,40,0.55)";
   ctx.lineWidth = 3;
   ctx.strokeRect(1, 1, n - 2, n - 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
   ctx.lineWidth = 1;
   ctx.strokeRect(5, 5, n - 10, n - 10);
   t.update();

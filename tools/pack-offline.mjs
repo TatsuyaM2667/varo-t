@@ -2,13 +2,13 @@
 // The ZIP contains the game, a dependency-free static server (Node) and
 // launcher scripts for Windows/macOS/Linux (falling back to Python).
 //   npm run build && npm run pack:offline
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { deflateRawSync } from 'node:zlib';
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { deflateRawSync } from "node:zlib";
 
-const DIST = 'dist';
-const OUT = 'halcyon-offline.zip';
-const ROOT = 'halcyon-offline';
+const DIST = "dist";
+const OUT = "halcyon-offline.zip";
+const ROOT = "halcyon-offline";
 
 const SERVE = `// Minimal static server for the offline build. Usage: node serve.mjs [port]
 import { createServer } from 'node:http';
@@ -84,9 +84,15 @@ function walk(dir) {
 }
 
 const entries = [
-  ...walk(DIST).map((f) => ({ name: `${ROOT}/game/${relative(DIST, f).split('\\').join('/')}`, data: readFileSync(f) })),
+  ...walk(DIST).map((f) => ({
+    name: `${ROOT}/game/${relative(DIST, f).split("\\").join("/")}`,
+    data: readFileSync(f),
+  })),
   { name: `${ROOT}/serve.mjs`, data: Buffer.from(SERVE) },
-  { name: `${ROOT}/start.bat`, data: Buffer.from(START_BAT.replace(/\n/g, '\r\n')) },
+  {
+    name: `${ROOT}/start.bat`,
+    data: Buffer.from(START_BAT.replace(/\n/g, "\r\n")),
+  },
   { name: `${ROOT}/start.sh`, data: Buffer.from(START_SH), mode: 0o755 },
   { name: `${ROOT}/README.txt`, data: Buffer.from(README) },
 ];
@@ -131,4 +137,6 @@ end.writeUInt16LE(entries.length, 10);
 end.writeUInt32LE(cdSize, 12);
 end.writeUInt32LE(offset, 16);
 writeFileSync(OUT, Buffer.concat([...parts, ...central, end]));
-console.log(`wrote ${OUT}: ${entries.length} files, ${(statSync(OUT).size / 1048576).toFixed(2)} MiB`);
+console.log(
+  `wrote ${OUT}: ${entries.length} files, ${(statSync(OUT).size / 1048576).toFixed(2)} MiB`,
+);

@@ -1,17 +1,31 @@
-import { AudioEngine } from '../audio/audio-engine';
-import { type Features, resolveFeatures } from '../config/features';
-import { QUALITY_PRESETS, type QualityName, type QualityPreset } from '../config/quality';
-import type { InputManager } from '../input/input-manager';
-import type { EngineHandle } from '../render/engine';
-import { setLang, t } from '../ui/i18n';
-import { howtoScreen, resultsScreen, settingsScreen, titleScreen } from '../ui/screens';
-import { AttractMode } from './attract';
-import { computeScore, insertHighScore, loadHighScores, rankFor } from './highscore';
-import { IdleWatchdog } from './idle-watchdog';
-import { type MatchResult, MatchMode, type ModeContext } from './match';
-import { ReplayViewer } from './replay-viewer';
-import { type Settings, loadSettings, saveSettings } from './settings';
-import { type KV, browserKV } from './storage';
+import { AudioEngine } from "../audio/audio-engine";
+import { type Features, resolveFeatures } from "../config/features";
+import {
+  QUALITY_PRESETS,
+  type QualityName,
+  type QualityPreset,
+} from "../config/quality";
+import type { InputManager } from "../input/input-manager";
+import type { EngineHandle } from "../render/engine";
+import { setLang, t } from "../ui/i18n";
+import {
+  howtoScreen,
+  resultsScreen,
+  settingsScreen,
+  titleScreen,
+} from "../ui/screens";
+import { AttractMode } from "./attract";
+import {
+  computeScore,
+  insertHighScore,
+  loadHighScores,
+  rankFor,
+} from "./highscore";
+import { IdleWatchdog } from "./idle-watchdog";
+import { type MatchResult, MatchMode, type ModeContext } from "./match";
+import { ReplayViewer } from "./replay-viewer";
+import { type Settings, loadSettings, saveSettings } from "./settings";
+import { type KV, browserKV } from "./storage";
 
 /** Exhibition timings. ★ 展示用の時間設定 */
 export const EXHIBIT = {
@@ -25,25 +39,30 @@ export const EXHIBIT = {
   crashReloadCount: 3,
 };
 
-type State = 'title' | 'howto' | 'settings' | 'match' | 'results' | 'replay';
+type State = "title" | "howto" | "settings" | "match" | "results" | "replay";
 
 export function detectQuality(gfx: EngineHandle): QualityName {
-  let renderer = '';
+  let renderer = "";
   try {
-    const info = (gfx.engine as unknown as { getGlInfo?: () => { renderer?: string; vendor?: string } }).getGlInfo?.();
-    renderer = `${info?.vendor ?? ''} ${info?.renderer ?? ''}`;
+    const info = (
+      gfx.engine as unknown as {
+        getGlInfo?: () => { renderer?: string; vendor?: string };
+      }
+    ).getGlInfo?.();
+    renderer = `${info?.vendor ?? ""} ${info?.renderer ?? ""}`;
   } catch {
     /* ignore */
   }
-  if (/swiftshader|llvmpipe|software/i.test(renderer)) return 'low';
+  if (/swiftshader|llvmpipe|software/i.test(renderer)) return "low";
   // Only clearly discrete GPUs start on High; integrated ones (Intel UHD/Iris,
   // Radeon 680M/780M, Apple…) start on Medium, which measured 60 fps on a 680M.
-  if (/nvidia|geforce|rtx|gtx|radeon rx|radeon pro|arc a\d/i.test(renderer)) return 'high';
-  return 'medium';
+  if (/nvidia|geforce|rtx|gtx|radeon rx|radeon pro|arc a\d/i.test(renderer))
+    return "high";
+  return "medium";
 }
 
 export class App {
-  private state: State = 'title';
+  private state: State = "title";
   private readonly kv: KV = browserKV();
   settings: Settings;
   private audio: AudioEngine | null = null;
@@ -75,20 +94,31 @@ export class App {
     setLang(this.settings.lang);
     this.qualityName = this.resolveQualityName();
     this.quality = QUALITY_PRESETS[this.qualityName];
-    this.features = this.withSafeMode(resolveFeatures(this.quality.features, params.get('f')));
+    this.features = this.withSafeMode(
+      resolveFeatures(this.quality.features, params.get("f")),
+    );
     this.input.sensitivity = this.settings.sensitivity;
     this.input.setBindings(this.settings.bindings);
-    this.overlay = document.createElement('div');
+    this.overlay = document.createElement("div");
     ui.append(this.overlay);
-    this.fps = document.createElement('div');
-    this.fps.className = 'fps';
+    this.fps = document.createElement("div");
+    this.fps.className = "fps";
     ui.append(this.fps);
-    this.showDebug = params.has('debug');
+    this.showDebug = params.has("debug");
     const now = performance.now() / 1000;
     // ?idle=N&attract=N shorten the exhibition timers (for tests / rehearsals)
-    const num = (k: string, d: number): number => (params.has(k) && Number(params.get(k)) > 0 ? Number(params.get(k)) : d);
-    this.idle = new IdleWatchdog(num('idle', EXHIBIT.idleToTitleSec), () => this.onIdle(), now);
-    this.titleIdle = new IdleWatchdog(num('attract', EXHIBIT.titleToAttractSec), () => this.enterShowcase(), now);
+    const num = (k: string, d: number): number =>
+      params.has(k) && Number(params.get(k)) > 0 ? Number(params.get(k)) : d;
+    this.idle = new IdleWatchdog(
+      num("idle", EXHIBIT.idleToTitleSec),
+      () => this.onIdle(),
+      now,
+    );
+    this.titleIdle = new IdleWatchdog(
+      num("attract", EXHIBIT.titleToAttractSec),
+      () => this.enterShowcase(),
+      now,
+    );
 
     const poke = (): void => {
       const n = performance.now() / 1000;
@@ -97,20 +127,21 @@ export class App {
       this.audio?.resume();
       if (this.attract?.showcase) this.exitShowcase();
     };
-    for (const ev of ['keydown', 'mousedown', 'mousemove', 'wheel']) window.addEventListener(ev, poke, { passive: true });
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'F3') {
+    for (const ev of ["keydown", "mousedown", "mousemove", "wheel"])
+      window.addEventListener(ev, poke, { passive: true });
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "F3") {
         this.showDebug = !this.showDebug;
         e.preventDefault();
       }
     });
-    document.addEventListener('pointerlockchange', () => this.onPointerLock());
+    document.addEventListener("pointerlockchange", () => this.onPointerLock());
   }
 
   /** Crashes earlier in this browser session progressively disable risky features. */
   static safeLevel(): number {
     try {
-      const raw = sessionStorage.getItem('halcyon.crash');
+      const raw = sessionStorage.getItem("halcyon.crash");
       if (!raw) return 0;
       const { n, t: at } = JSON.parse(raw) as { n: number; t: number };
       return Date.now() - at < 5 * 60_000 ? n : 0;
@@ -134,10 +165,10 @@ export class App {
   }
 
   private resolveQualityName(): QualityName {
-    if (App.safeLevel() >= 2) return 'low';
-    const q = this.params.get('q') as QualityName | null;
+    if (App.safeLevel() >= 2) return "low";
+    const q = this.params.get("q") as QualityName | null;
     if (q && q in QUALITY_PRESETS) return q;
-    if (this.settings.quality !== 'auto') return this.settings.quality;
+    if (this.settings.quality !== "auto") return this.settings.quality;
     return detectQuality(this.gfx);
   }
 
@@ -149,7 +180,8 @@ export class App {
       ui: this.ui,
       features: this.features,
       quality: this.quality,
-      onQualityChange: (q, reason) => console.info(`[quality] → scale ${q.renderScale} (${reason})`),
+      onQualityChange: (q, reason) =>
+        console.info(`[quality] → scale ${q.renderScale} (${reason})`),
     };
   }
 
@@ -160,7 +192,7 @@ export class App {
         this.audio = new AudioEngine();
         this.audio.setVolume(this.settings.volume);
       } catch (err) {
-        console.warn('[audio] unavailable', err);
+        console.warn("[audio] unavailable", err);
       }
     }
     return this.audio;
@@ -192,7 +224,7 @@ export class App {
     this.disposeModes();
     if (document.pointerLockElement) document.exitPointerLock();
     this.input.enabled = false;
-    this.state = 'title';
+    this.state = "title";
     this.ensureAttract();
     this.attract!.setShowcase(false);
     this.titleIdle.poke(performance.now() / 1000);
@@ -204,38 +236,38 @@ export class App {
         difficulty: (d) => {
           this.settings.difficulty = d;
           saveSettings(this.kv, this.settings);
-          this.audio?.ui('click');
+          this.audio?.ui("click");
         },
-        hover: () => this.audio?.ui('hover'),
+        hover: () => this.audio?.ui("hover"),
       }),
     );
   }
 
   private enterShowcase(): void {
-    if (this.state !== 'title' || !this.attract) return;
+    if (this.state !== "title" || !this.attract) return;
     this.attract.setShowcase(true);
     if (this.screen) this.screen.hidden = true;
-    const banner = document.createElement('div');
-    banner.className = 'attract-banner';
-    banner.textContent = t('attractBanner');
-    banner.dataset.attract = '1';
-    const tag = document.createElement('div');
-    tag.className = 'attract-tag';
-    tag.textContent = t('demo');
-    tag.dataset.attract = '1';
+    const banner = document.createElement("div");
+    banner.className = "attract-banner";
+    banner.textContent = t("attractBanner");
+    banner.dataset.attract = "1";
+    const tag = document.createElement("div");
+    tag.className = "attract-tag";
+    tag.textContent = t("demo");
+    tag.dataset.attract = "1";
     this.overlay.append(banner, tag);
   }
 
   private exitShowcase(): void {
     this.attract?.setShowcase(false);
-    this.overlay.querySelectorAll('[data-attract]').forEach((e) => e.remove());
+    this.overlay.querySelectorAll("[data-attract]").forEach((e) => e.remove());
     if (this.screen) this.screen.hidden = false;
   }
 
   private goHowto(startable: boolean): void {
-    this.state = 'howto';
+    this.state = "howto";
     this.ensureAudio();
-    this.audio?.ui('click');
+    this.audio?.ui("click");
     this.setScreen(
       howtoScreen(
         this.settings.bindings,
@@ -248,7 +280,7 @@ export class App {
 
   /** Settings screen; `fromMatch` = opened from the pause menu over a running match. */
   private goSettings(fromMatch = false): void {
-    if (!fromMatch) this.state = 'settings';
+    if (!fromMatch) this.state = "settings";
     else this.match?.setOverlayHidden(true);
     this.setScreen(
       settingsScreen(
@@ -266,7 +298,9 @@ export class App {
           if (qualityChanged && !fromMatch) {
             this.qualityName = this.resolveQualityName();
             this.quality = QUALITY_PRESETS[this.qualityName];
-            this.features = this.withSafeMode(resolveFeatures(this.quality.features, this.params.get('f')));
+            this.features = this.withSafeMode(
+              resolveFeatures(this.quality.features, this.params.get("f")),
+            );
             this.attract?.dispose();
             this.attract = null;
             this.ensureAttract();
@@ -275,7 +309,9 @@ export class App {
             // applied when the next match starts
             this.qualityName = this.resolveQualityName();
             this.quality = QUALITY_PRESETS[this.qualityName];
-            this.features = this.withSafeMode(resolveFeatures(this.quality.features, this.params.get('f')));
+            this.features = this.withSafeMode(
+              resolveFeatures(this.quality.features, this.params.get("f")),
+            );
           }
           if (langChanged) this.goSettings(fromMatch);
         },
@@ -293,7 +329,7 @@ export class App {
     this.setScreen(null);
     this.attract?.dispose();
     this.attract = null;
-    this.state = 'match';
+    this.state = "match";
     // Fullscreen first, pointer lock after it settles: requesting both at once
     // makes Chrome reject the lock mid-transition (game stuck on "paused").
     void this.enterFullscreen().then(() => this.input.lockPointer());
@@ -305,19 +341,24 @@ export class App {
       () => this.goSettings(true),
     );
     this.input.enabled = this.input.pointerLocked;
-    this.match.setPaused(!this.input.pointerLocked && !this.params.has('autostart'));
+    this.match.setPaused(
+      !this.input.pointerLocked && !this.params.has("autostart"),
+    );
   }
 
   /** Best-effort fullscreen + Keyboard Lock; resolves when settled (never rejects). */
   private async enterFullscreen(): Promise<void> {
-    if (this.params.get('fs') === '0') return;
+    if (this.params.get("fs") === "0") return;
     try {
-      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      if (!document.fullscreenElement)
+        await document.documentElement.requestFullscreen();
     } catch {
       /* not allowed (no user gesture, iframe…): play windowed */
     }
     try {
-      await (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.();
+      await (
+        navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }
+      ).keyboard?.lock?.();
       this.input.keyboardLocked = true;
     } catch {
       this.input.keyboardLocked = false;
@@ -337,31 +378,40 @@ export class App {
     this.disposeModes();
     if (document.pointerLockElement) document.exitPointerLock();
     this.input.enabled = false;
-    this.state = 'results';
+    this.state = "results";
     this.ensureAttract();
     const score = computeScore(r.summary);
     // only offer name entry once per match (the screen is rebuilt after replays)
-    const rank = this.submitted ? -1 : rankFor(loadHighScores(this.kv), score.total);
-    this.audio?.ui(r.summary.won ? 'win' : 'lose');
+    const rank = this.submitted
+      ? -1
+      : rankFor(loadHighScores(this.kv), score.total);
+    this.audio?.ui(r.summary.won ? "win" : "lose");
     this.setScreen(
-      resultsScreen(r.summary, score, rank, r.history, this.features.roundReplay, {
-        again: () => this.goHowto(true),
-        title: () => this.goTitle(),
-        replay: (round) => this.startReplay(round),
-        submitName: (name) => {
-          if (rank >= 0 && !this.submitted) {
-            this.submitted = true;
-            insertHighScore(this.kv, {
-              name,
-              score: score.total,
-              kills: r.summary.stats.kills,
-              won: r.summary.won,
-              difficulty: r.summary.difficulty,
-              date: localDate(),
-            });
-          }
+      resultsScreen(
+        r.summary,
+        score,
+        rank,
+        r.history,
+        this.features.roundReplay,
+        {
+          again: () => this.goHowto(true),
+          title: () => this.goTitle(),
+          replay: (round) => this.startReplay(round),
+          submitName: (name) => {
+            if (rank >= 0 && !this.submitted) {
+              this.submitted = true;
+              insertHighScore(this.kv, {
+                name,
+                score: score.total,
+                kills: r.summary.stats.kills,
+                won: r.summary.won,
+                difficulty: r.summary.difficulty,
+                date: localDate(),
+              });
+            }
+          },
         },
-      }),
+      ),
     );
   }
 
@@ -370,20 +420,22 @@ export class App {
     if (!r) return;
     this.attract?.dispose();
     this.attract = null;
-    this.state = 'replay';
+    this.state = "replay";
     this.setScreen(null);
-    this.replay = new ReplayViewer(this.ctx(), r.log, round, () => this.showResults());
+    this.replay = new ReplayViewer(this.ctx(), r.log, round, () =>
+      this.showResults(),
+    );
   }
 
   private onPointerLock(): void {
     const locked = this.input.pointerLocked;
-    this.input.enabled = locked && this.state === 'match';
+    this.input.enabled = locked && this.state === "match";
     if (this.match) this.match.setPaused(!locked);
   }
 
   private onIdle(): void {
-    if (this.state === 'title') return;
-    console.info('[exhibit] idle → title');
+    if (this.state === "title") return;
+    console.info("[exhibit] idle → title");
     this.goTitle();
   }
 
@@ -395,43 +447,47 @@ export class App {
     const dt = (now - this.last) / 1000;
     this.last = now;
     const ns = now / 1000;
-    if (this.state !== 'title') this.idle.update(ns);
+    if (this.state !== "title") this.idle.update(ns);
     else this.titleIdle.update(ns);
     if (this.match) this.match.frame(dt);
     else if (this.replay) this.replay.frame(dt);
     else this.attract?.frame(dt);
     if (this.showDebug) {
-      const r = this.match?.renderer ?? this.replay?.renderer ?? this.attract?.renderer;
+      const r =
+        this.match?.renderer ?? this.replay?.renderer ?? this.attract?.renderer;
       this.fps.textContent = `${this.gfx.kind} ${this.gfx.engine.getFps().toFixed(0)}fps  q=${this.qualityName} scale=${(1 / this.gfx.engine.getHardwareScalingLevel()).toFixed(2)}  meshes=${r?.scene.getActiveMeshes().length ?? 0}`;
-    } else if (this.fps.textContent) this.fps.textContent = '';
+    } else if (this.fps.textContent) this.fps.textContent = "";
   }
 
   /** Called on any uncaught error: show a message, tear down, return to title. */
   recover(err: unknown): void {
-    console.error('[exhibit] recovering from', err);
+    console.error("[exhibit] recovering from", err);
     if (this.recovering) return;
     const now = Date.now();
     this.crashes = this.crashes.filter((t0) => now - t0 < 60_000);
     this.crashes.push(now);
     const lvl = App.safeLevel() + 1;
     try {
-      sessionStorage.setItem('halcyon.crash', JSON.stringify({ n: lvl, t: now }));
+      sessionStorage.setItem(
+        "halcyon.crash",
+        JSON.stringify({ n: lvl, t: now }),
+      );
     } catch {
       /* ignore */
     }
     if (this.crashes.length >= EXHIBIT.crashReloadCount || lvl >= 2) {
       // reload with safer settings (WebGL2 after repeated failures)
       const url = new URL(location.href);
-      if (lvl >= 3) url.searchParams.set('engine', 'webgl');
+      if (lvl >= 3) url.searchParams.set("engine", "webgl");
       location.replace(url.toString());
       return;
     }
     // drop the risky effects for the rest of this session
     this.features = this.withSafeMode(this.features);
     this.recovering = true;
-    const box = document.createElement('div');
-    box.className = 'crash';
-    box.textContent = t('errorRecover');
+    const box = document.createElement("div");
+    box.className = "crash";
+    box.textContent = t("errorRecover");
     this.ui.append(box);
     setTimeout(() => {
       try {
@@ -454,11 +510,18 @@ export class App {
 
   /** Test hook: current state and a few internals. */
   debugState() {
-    return { state: this.state, match: this.match, attract: this.attract, replay: this.replay, quality: this.qualityName, features: this.features };
+    return {
+      state: this.state,
+      match: this.match,
+      attract: this.attract,
+      replay: this.replay,
+      quality: this.qualityName,
+      features: this.features,
+    };
   }
 }
 
 function localDate(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
