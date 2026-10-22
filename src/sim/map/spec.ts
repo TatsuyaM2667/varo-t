@@ -91,6 +91,7 @@ export function buildFromSpec(spec: MapSpec): MapData {
     }
   }
   const wallTint = (c: number, r: number): string => (zoneIdx[r][c] >= 0 ? spec.zones[zoneIdx[r][c]].wall : spec.defaultWall);
+  const floorTint = (c: number, r: number): string => (zoneIdx[r][c] >= 0 ? spec.zones[zoneIdx[r][c]].floor : spec.defaultFloor);
   const zoneLevel = (c: number, r: number): number => (zoneIdx[r][c] >= 0 ? (spec.zones[zoneIdx[r][c]].level ?? 0) : 0);
 
   // floor level per cell: explicit digit > (markers/cover: neighbouring digits) > zone level
@@ -154,7 +155,7 @@ export function buildFromSpec(spec: MapSpec): MapData {
     // only the cells whose level is exactly l start a slab at that height: build cumulative slabs
     for (const rc of mergeSolidCells(mask)) {
       const b = rectBox(rc);
-      push({ material: 'concrete', ...b, minY: (l - 1) * LEVEL, maxY: l * LEVEL, tint: wallTint(rc.c0, rc.r0), style: 'platform' });
+      push({ material: 'floor', ...b, minY: (l - 1) * LEVEL, maxY: l * LEVEL, tint: floorTint(rc.c0, rc.r0), style: 'platform' });
     }
   }
 
@@ -293,16 +294,15 @@ export function buildFromSpec(spec: MapSpec): MapData {
   box(relay.x, relay.z, 0.8, 0.8, 1.6, relay.y, 'metal', { style: 'pillar' });
 
   const spawnsFrom = (k: string, yaw: number): SpawnPoint[] => {
+    // the 10 cells closest to the middle of the spawn area (never against a wall)
     const cells = cellsOf(k);
-    // spread: sort by row then column and take an even sample of up to 10
-    const n = Math.min(10, cells.length);
-    const out: SpawnPoint[] = [];
-    for (let i = 0; i < n; i++) {
-      const [c, r] = cells[Math.floor((i * cells.length) / n)];
-      out.push({ x: cx(c), y: level[r][c] * LEVEL, z: cz(r), yaw });
-    }
-    // interleave so the first few spawns are spread out
-    return [...out.filter((_, i) => i % 2 === 0), ...out.filter((_, i) => i % 2 === 1)];
+    const mx = cells.reduce((a, [c]) => a + c, 0) / cells.length;
+    const my = cells.reduce((a, [, r]) => a + r, 0) / cells.length;
+    const chosen = cells
+      .map(([c, r]) => ({ c, r, d: (c - mx) ** 2 + (r - my) ** 2 + (r % 2) * 0.01 }))
+      .sort((a, b) => a.d - b.d || a.r - b.r || a.c - b.c)
+      .slice(0, 10);
+    return chosen.map(({ c, r }) => ({ x: cx(c), y: level[r][c] * LEVEL, z: cz(r), yaw }));
   };
 
   const entrances: Entrance[] = clusters('E').map((g, i) => {

@@ -16,11 +16,13 @@ import { Scene } from '@babylonjs/core/scene';
 import type { Features } from '../config/features';
 import { INPUT } from '../config/input';
 import type { QualityPreset } from '../config/quality';
+import { type Theme, themeOf } from '../config/themes';
 import { LIGHTING_MOODS, type LightingMood } from '../config/visuals';
 import type { MapData } from '../sim/map/map-def';
 import type { Bvh } from '../sim/physics/bvh';
 import { type AgentPose, CharacterSet } from './characters';
 import { Fx } from './fx';
+import { type Architecture, buildArchitecture } from './architecture';
 import { type Greybox, buildGreybox } from './greybox';
 import { SurfaceMaterials } from './materials';
 import { Physics } from './physics';
@@ -57,7 +59,9 @@ export class GameRenderer {
   shadows: ShadowGenerator | null = null;
   private greybox: Greybox | null = null;
   private currentMap: MapData | null = null;
-  private readonly mats: SurfaceMaterials;
+  private mats: SurfaceMaterials;
+  private architecture: Architecture | null = null;
+  private theme: Theme | null = null;
   private skyDome!: Mesh;
   private probe: ReflectionProbe | null = null;
   private quality: QualityPreset;
@@ -99,7 +103,7 @@ export class GameRenderer {
     this.fx = new Fx(scene, this.fxOptions(quality), null, map.bounds);
     this.smoke = new SmokeViz(scene, quality.smokeParticles, features.volumetricSmoke);
     this.syncMap(map);
-    this.setMood(LIGHTING_MOODS[0]);
+    this.setMood(this.moods[0]);
     this.applyQuality(quality, features);
     if (features.destructibles) {
       void Physics.create(scene, map.colliders).then((p) => {
@@ -117,10 +121,23 @@ export class GameRenderer {
   syncMap(map: MapData): void {
     if (this.currentMap?.key === map.key) return;
     this.currentMap = map;
+    // stage maps bring a theme: neutral textures (zone tints give the colour) + decoration
+    const theme = themeOf(map.visual?.theme);
+    if (theme !== this.theme) {
+      this.theme = theme;
+      this.mats = new SurfaceMaterials(this.scene, theme?.surfaces);
+    }
     this.greybox?.dispose();
+    this.architecture?.dispose();
     this.greybox = buildGreybox(this.scene, map.colliders, this.mats, this.features.pbrLighting);
+    this.architecture = theme && map.visual ? buildArchitecture(this.scene, map, theme, this.features.pbrLighting) : null;
     this.fx.clearDecals();
     this.rebuildShadows();
+  }
+
+  /** Lighting moods for the current map (theme moods on stages, default list otherwise). */
+  get moods(): LightingMood[] {
+    return this.theme?.moods ?? LIGHTING_MOODS;
   }
 
   /** Show/hide destructible pieces according to a world's state. */
@@ -199,7 +216,8 @@ export class GameRenderer {
     s.fogColor = Color3.FromHexString(m.fog.color);
     this.hemi.diffuse = Color3.FromHexString(m.ambient.sky);
     this.hemi.groundColor = Color3.FromHexString(m.ambient.ground);
-    this.hemi.intensity = m.ambient.intensity;
+    // Standard materials have no image-based ambient, so give them more sky light
+    this.hemi.intensity = m.ambient.intensity * (this.features.pbrLighting ? 1 : 1.9);
     const dir = new Vector3(...m.sun.direction).normalize();
     this.sun.direction = dir;
     this.sun.position = dir.scale(-90);
@@ -244,14 +262,19 @@ export class GameRenderer {
     sg.bias = 0.0006;
     sg.normalBias = 0.015;
     for (const m of this.greybox.statics) sg.addShadowCaster(m, false);
+    for (const m of this.architecture?.meshes ?? []) sg.addShadowCaster(m, false);
     for (const m of this.greybox.breakables.values()) sg.addShadowCaster(m, false);
     this.sun.shadowMinZ = 1;
     this.sun.shadowMaxZ = 220;
     this.sun.autoUpdateExtends = false;
-    this.sun.orthoLeft = -62;
-    this.sun.orthoRight = 62;
-    this.sun.orthoTop = 62;
-    this.sun.orthoBottom = -62;
+    // cover the whole map (stage maps are long), plus a margin for slanted sun
+    const b = this.currentMap?.bounds;
+    const half = b ? Math.max(b.maxX - b.minX, b.maxZ - b.minZ) / 2 + 12 : 62;
+    this.sun.orthoLeft = -half;
+    this.sun.orthoRight = half;
+    this.sun.orthoTop = half;
+    this.sun.orthoBottom = -half;
+    this.sun.shadowMaxZ = Math.max(220, half * 3);
     this.shadows = sg;
     // the static map only needs one render; agents need every frame
     const sm = sg.getShadowMap()!;
@@ -296,6 +319,7 @@ export class GameRenderer {
     this.characters.dispose();
     this.post.dispose();
     this.greybox?.dispose();
+    this.architecture?.dispose();
     this.scene.dispose();
   }
 }

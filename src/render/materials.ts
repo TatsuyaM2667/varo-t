@@ -5,7 +5,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Scene } from '@babylonjs/core/scene';
-import { PALETTE } from '../config/visuals';
+import { PALETTE, type SurfaceStyle } from '../config/visuals';
 import type { MaterialTag } from '../sim/physics/aabb';
 import { createGridTexture } from './textures';
 
@@ -29,12 +29,16 @@ export class SurfaceMaterials {
   private readonly textures = new Map<MaterialTag, DynamicTexture>();
   private readonly cache = new Map<string, Material>();
 
-  constructor(private readonly scene: Scene) {}
+  constructor(
+    private readonly scene: Scene,
+    /** surface styles (default palette, or a stage theme's neutral textures) */
+    readonly surfaces: Record<MaterialTag, SurfaceStyle> = PALETTE.surfaces,
+  ) {}
 
   texture(tag: MaterialTag): DynamicTexture {
     let t = this.textures.get(tag);
     if (!t) {
-      t = createGridTexture(this.scene, `tex-${tag}`, PALETTE.surfaces[tag].grid);
+      t = createGridTexture(this.scene, `tex-${tag}`, this.surfaces[tag].grid);
       this.textures.set(tag, t);
     }
     return t;
@@ -44,7 +48,7 @@ export class SurfaceMaterials {
     const key = `${tag}:${pbr ? 'pbr' : 'std'}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
-    const style = PALETTE.surfaces[tag];
+    const style = this.surfaces[tag];
     const params = PBR_PARAMS[tag];
     let mat: Material;
     if (pbr) {

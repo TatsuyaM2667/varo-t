@@ -357,7 +357,8 @@ class Minimap {
     g.fillRect(0, 0, canvas.width, canvas.height);
     g.fillStyle = "rgba(200,210,225,0.5)";
     for (const c of map.colliders) {
-      if (c.material === "floor") continue;
+      // floors, raised floors, roofs and archway lintels aren't obstacles on a top-down map
+      if (c.material === "floor" || c.style === "roof" || c.style === "lintel" || c.style === "platform") continue;
       const [x0, y0] = this.toPx(c.minX, c.maxZ);
       const [x1, y1] = this.toPx(c.maxX, c.minZ);
       g.fillStyle =
