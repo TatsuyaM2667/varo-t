@@ -514,6 +514,8 @@ const BONE_COUNT = 13;
 
 const tmpPos = new Vector3();
 const tmpDir = new Vector3();
+const tmpX = new Vector3();
+const tmpY = new Vector3();
 const tmpScale = new Vector3(1, 1, 1);
 const tmpQuat = new Quaternion();
 const UP = Vector3.Up();
@@ -685,7 +687,12 @@ class AgentVisual {
     tmpDir.normalize();
     // avoid a degenerate basis when the limb points straight up/down
     const up = Math.abs(tmpDir.y) > 0.98 ? FWD : UP;
-    Quaternion.FromLookDirectionLHToRef(tmpDir, up, tmpQuat);
+    // NB: FromLookDirectionLH assumes `up` ⟂ direction and twists limbs otherwise,
+    // so build the orthonormal basis (+Z along the limb) explicitly.
+    Vector3.CrossToRef(up, tmpDir, tmpX);
+    tmpX.normalize();
+    Vector3.CrossToRef(tmpDir, tmpX, tmpY);
+    Quaternion.RotationQuaternionFromAxisToRef(tmpX, tmpY, tmpDir, tmpQuat);
     this.pose(bone, a.x, a.y, a.z, tmpQuat);
   }
 
