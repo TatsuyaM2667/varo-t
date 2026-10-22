@@ -102,3 +102,26 @@ test('Tier 0 (all feature flags off) still plays', async ({ page }) => {
   await page.waitForFunction(() => (window as unknown as Hooks).__game.app.debugState().match?.world.round.phase === 'live', null, { timeout: 30_000 });
   expect(errors).toEqual([]);
 });
+
+test('custom key bindings from storage drive the game', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('halcyon.settings.v1', JSON.stringify({ bindings: { jump: ['KeyJ'], forward: ['ArrowUp'] } }));
+  });
+  const errors = await boot(page, 'engine=webgl&q=low&autostart');
+  await startMatch(page);
+  await page.waitForFunction(() => (window as unknown as Hooks).__game.app.debugState().match?.world.round.phase === 'live', null, { timeout: 30_000 });
+  const pos = () => page.evaluate(() => {
+    const a = (window as unknown as Hooks).__game.app.debugState().match!.world.agents[0];
+    return { y: (a as unknown as { y: number }).y, z: a.z };
+  });
+  const z0 = (await pos()).z;
+  await page.keyboard.down('ArrowUp');
+  await page.waitForTimeout(800);
+  await page.keyboard.up('ArrowUp');
+  expect((await pos()).z - z0).toBeGreaterThan(0.5);
+  await page.keyboard.down('KeyJ');
+  await page.waitForTimeout(150);
+  expect((await pos()).y).toBeGreaterThan(0.1);
+  await page.keyboard.up('KeyJ');
+  expect(errors).toEqual([]);
+});

@@ -2,6 +2,21 @@ import type { Settings } from '../app/settings';
 import type { HighScore, ScoreBreakdown, MatchSummary } from '../app/highscore';
 import { BRAND } from '../config/brand';
 import { INPUT } from '../config/input';
+import type { InputManager } from '../input/input-manager';
+import {
+  ACTIONS,
+  ACTION_LABELS,
+  type Action,
+  type Bindings,
+  RESERVED,
+  SLOTS,
+  assignKey,
+  clearKey,
+  defaultBindings,
+  isCtrlCode,
+  keyLabel,
+  unboundActions,
+} from '../input/bindings';
 import { t } from './i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] {
@@ -62,34 +77,45 @@ export function titleScreen(settings: Settings, scores: readonly HighScore[], h:
   return s;
 }
 
-const key = (k: string) => `<span class="key">${k}</span>`;
+const key = (k: string) => `<span class="key">${esc(k)}</span>`;
 
-/** Key reference grid, shared by the controls card, the pause screen and the in-game overlay. */
-export function controlsGridHtml(): string {
+/** Keys for an action as key caps ("—" when unbound); Ctrl gets a fullscreen note. */
+function keysFor(b: Bindings, a: Action): string {
+  if (!b[a].length) return key('—');
+  return b[a]
+    .map((c) => key(keyLabel(c)) + (isCtrlCode(c) ? '<small style="color:var(--dim)">(全画面時)</small>' : ''))
+    .join(' ');
+}
+
+/** Key reference grid (from the live bindings), shared by the controls card, pause screen and in-game overlay. */
+export function controlsGridHtml(b: Bindings): string {
+  const L = (a: Action): string => ACTION_LABELS[a].ja + ' / ' + ACTION_LABELS[a].en;
+  const first = (a: Action): string => key(b[a][0] ? keyLabel(b[a][0]) : '—');
   return `<div class="howto-grid">
-      <div class="key-row">${key('W')}${key('A')}${key('S')}${key('D')} 移動 / Move</div>
+      <div class="key-row">${first('forward')}${first('left')}${first('back')}${first('right')} 移動 / Move</div>
       <div class="key-row">${key('マウス')} 視点 / Look</div>
-      <div class="key-row">${key('Shift')} 歩き（足音なし）/ Walk</div>
-      <div class="key-row">${key('左クリック')} 射撃 / Fire</div>
-      <div class="key-row">${key('Space')} ジャンプ / Jump</div>
-      <div class="key-row">${key('右クリック')} 覗き込み / Aim</div>
-      <div class="key-row">${key('C')} / ${key('Ctrl')}<small style="color:var(--dim)">(全画面時)</small> しゃがみ / Crouch</div>
-      <div class="key-row">${key('R')} リロード / Reload</div>
-      <div class="key-row">${key('Q')} ${BRAND.abilities.smoke}: スモーク / Smoke</div>
-      <div class="key-row">${key('1')}${key('2')}${key('3')} ${BRAND.weapons.rifle} / ${BRAND.weapons.sidearm} / ${BRAND.weapons.sniper}</div>
-      <div class="key-row">${key('E')} ${BRAND.abilities.dash}: ダッシュ / Dash</div>
+      <div class="key-row">${keysFor(b, 'walk')} ${L('walk')}</div>
+      <div class="key-row">${keysFor(b, 'fire')} ${L('fire')}</div>
+      <div class="key-row">${keysFor(b, 'jump')} ${L('jump')}</div>
+      <div class="key-row">${keysFor(b, 'ads')} ${L('ads')}</div>
+      <div class="key-row">${keysFor(b, 'crouch')} ${L('crouch')}</div>
+      <div class="key-row">${keysFor(b, 'reload')} ${L('reload')}</div>
+      <div class="key-row">${keysFor(b, 'ability1')} ${BRAND.abilities.smoke}: ${L('ability1')}</div>
+      <div class="key-row">${first('weapon1')}${first('weapon2')}${first('weapon3')} ${BRAND.weapons.rifle} / ${BRAND.weapons.sidearm} / ${BRAND.weapons.sniper}</div>
+      <div class="key-row">${keysFor(b, 'ability2')} ${BRAND.abilities.dash}: ${L('ability2')}</div>
+      <div class="key-row">${keysFor(b, 'help')} ${L('help')}</div>
       <div class="key-row">${key('Esc')} 一時停止 / Pause</div>
     </div>`;
 }
 
 /** The one-page controls card, shown before every match ("クリックして開始"). */
-export function howtoScreen(startable: boolean, onStart: () => void, onBack: () => void): HTMLDivElement {
+export function howtoScreen(bindings: Bindings, startable: boolean, onStart: () => void, onBack: () => void): HTMLDivElement {
   const s = el('div', 'screen dim');
   s.innerHTML = `<div class="card">
     <h2>${t('howto')}</h2>
-    ${controlsGridHtml()}
+    ${controlsGridHtml(bindings)}
     <div style="margin-top:12px;font-size:13px;color:var(--warn)">🖱 ${t('touchpadHint')}</div>
-    <div class="objective">🎯 ${t('objective')}<br><small style="color:var(--dim)">止まって撃つと当たりやすい・連射は反動で上に跳ねるのでマウスを下に引く</small></div>
+    <div class="objective">🎯 ${t('objective')}<br><small style="color:var(--dim)">止まって撃つと当たりやすい・連射は反動で上に跳ねるのでマウスを下に引く・キーは「設定」で変更できます</small></div>
     ${startable ? `<div class="howto-start">${t('clickToStart')}</div>` : `<div class="actions"><button data-a="back">${t('close')}</button></div>`}
   </div>`;
   s.addEventListener('click', (ev) => {
@@ -100,20 +126,72 @@ export function howtoScreen(startable: boolean, onStart: () => void, onBack: () 
   return s;
 }
 
-export function settingsScreen(settings: Settings, onChange: (s: Settings) => void, onClose: () => void): HTMLDivElement {
+export function settingsScreen(settings: Settings, input: InputManager, onChange: (s: Settings) => void, onClose: () => void): HTMLDivElement {
   const s = el('div', 'screen dim');
+  const lang = settings.lang;
   const seg = (name: keyof Settings, opts: [string, string][]) =>
     `<div class="seg" data-seg="${name}">${opts.map(([v, label]) => `<button data-v="${v}" class="${String(settings[name]) === v ? 'on' : ''}">${label}</button>`).join('')}</div>`;
-  s.innerHTML = `<div class="card">
+  s.innerHTML = `<div class="card settings-card">
     <h2>${t('settings')}</h2>
     <div class="settings-row"><span>${t('sensitivity')}</span><input type="range" min="${INPUT.minSensitivity}" max="${INPUT.maxSensitivity}" step="0.01" value="${settings.sensitivity}" data-r="sensitivity"><b data-o="sensitivity">${settings.sensitivity.toFixed(2)}</b></div>
     <div class="settings-row"><span>${t('volume')}</span><input type="range" min="0" max="1" step="0.01" value="${settings.volume}" data-r="volume"><b data-o="volume">${Math.round(settings.volume * 100)}</b></div>
     <div class="settings-row"><span>${t('quality')}</span>${seg('quality', [['auto', t('auto')], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']])}<span></span></div>
     <div class="settings-row"><span>${t('difficulty')}</span>${seg('difficulty', [['easy', t('easy')], ['normal', t('normal')], ['hard', t('hard')]])}<span></span></div>
     <div class="settings-row"><span>${t('language')}</span>${seg('lang', [['ja', '日本語'], ['en', 'English']])}<span></span></div>
-    <div class="actions"><button class="primary" data-a="close">${t('close')}</button></div>
+    <h3 class="kb-title">${t('keyBindings')}</h3>
+    <div class="kb-help">${t('keyBindHelp')}</div>
+    <div class="kb-grid" data-kb></div>
+    <div class="kb-msg" data-kbmsg></div>
+    <div class="actions"><button data-a="resetKeys">${t('resetKeys')}</button><button class="primary" data-a="close">${t('close')}</button></div>
   </div>`;
-  const cur = { ...settings };
+  const cur: Settings = { ...settings, bindings: structuredClone(settings.bindings) };
+  const grid = s.querySelector('[data-kb]') as HTMLDivElement;
+  const msg = s.querySelector('[data-kbmsg]') as HTMLDivElement;
+  let capturing: { action: Action; slot: number } | null = null;
+  let ignoreClicksUntil = 0;
+
+  const renderKeys = (): void => {
+    grid.innerHTML = ACTIONS.map((a) => {
+      const slots = Array.from({ length: SLOTS }, (_, i) => {
+        const code = cur.bindings[a][i];
+        const active = capturing && capturing.action === a && capturing.slot === i;
+        return `<button class="kb-slot${active ? ' capturing' : ''}${code ? '' : ' empty'}" data-ka="${a}" data-ks="${i}">${active ? t('pressKey') : code ? esc(keyLabel(code)) : '＋'}</button>`;
+      }).join('');
+      return `<div class="kb-row${cur.bindings[a].length ? '' : ' unbound'}"><span>${ACTION_LABELS[a][lang]}</span>${slots}</div>`;
+    }).join('');
+  };
+
+  const stopCapture = (viaMouse = false): void => {
+    capturing = null;
+    input.capture = null;
+    // a captured mouse button is followed by a click event: don't treat it as a new UI click
+    if (viaMouse) ignoreClicksUntil = performance.now() + 300;
+    renderKeys();
+  };
+
+  const startCapture = (action: Action, slot: number): void => {
+    capturing = { action, slot };
+    msg.textContent = '';
+    input.capture = (code) => {
+      if (code === 'Escape') return stopCapture(false);
+      if (code === 'Delete' || code === 'Backspace') {
+        clearKey(cur.bindings, action, slot);
+      } else if (RESERVED.has(code)) {
+        msg.textContent = `${keyLabel(code)} ${t('keyReserved')}`;
+        return stopCapture(false);
+      } else {
+        const lost = assignKey(cur.bindings, action, Math.min(slot, cur.bindings[action].length), code);
+        if (lost) msg.textContent = `${keyLabel(code)}: ${ACTION_LABELS[lost][lang]} → ${ACTION_LABELS[action][lang]}`;
+      }
+      const unbound = unboundActions(cur.bindings);
+      if (unbound.length) msg.textContent += ` ⚠ ${t('unbound')}: ${unbound.map((u) => ACTION_LABELS[u][lang]).join(', ')}`;
+      onChange({ ...cur, bindings: structuredClone(cur.bindings) });
+      stopCapture(code.startsWith('Mouse'));
+    };
+    renderKeys();
+  };
+  renderKeys();
+
   s.addEventListener('input', (ev) => {
     const inp = ev.target as HTMLInputElement;
     const k = inp.dataset.r as 'sensitivity' | 'volume' | undefined;
@@ -121,19 +199,35 @@ export function settingsScreen(settings: Settings, onChange: (s: Settings) => vo
     cur[k] = Number(inp.value);
     const out = s.querySelector(`[data-o="${k}"]`)!;
     out.textContent = k === 'volume' ? String(Math.round(cur.volume * 100)) : cur.sensitivity.toFixed(2);
-    onChange({ ...cur });
+    onChange({ ...cur, bindings: structuredClone(cur.bindings) });
   });
   s.addEventListener('click', (ev) => {
+    if (performance.now() < ignoreClicksUntil) return;
     const btn = (ev.target as HTMLElement).closest('button');
     if (!btn) return;
-    if (btn.dataset.a === 'close') return onClose();
+    if (btn.dataset.ka) return startCapture(btn.dataset.ka as Action, Number(btn.dataset.ks));
+    if (capturing) return stopCapture(false);
+    if (btn.dataset.a === 'close') {
+      input.capture = null;
+      return onClose();
+    }
+    if (btn.dataset.a === 'resetKeys') {
+      cur.bindings = defaultBindings();
+      msg.textContent = '';
+      renderKeys();
+      onChange({ ...cur, bindings: structuredClone(cur.bindings) });
+      return;
+    }
     const g = btn.closest('[data-seg]') as HTMLElement | null;
     if (g && btn.dataset.v) {
       (cur as unknown as Record<string, string>)[g.dataset.seg!] = btn.dataset.v;
       g.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
-      onChange({ ...cur });
+      onChange({ ...cur, bindings: structuredClone(cur.bindings) });
     }
   });
+  (s as HTMLDivElement & { cleanup?: () => void }).cleanup = () => {
+    input.capture = null;
+  };
   return s;
 }
 

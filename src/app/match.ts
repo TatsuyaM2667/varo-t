@@ -82,6 +82,7 @@ export class MatchMode {
     difficulty: Difficulty,
     private readonly onFinish: (r: MatchResult) => void,
     private readonly onQuit: () => void,
+    private readonly onSettings: () => void = () => {},
   ) {
     const f = ctx.features;
     const roster: AgentSpec[] = [{ team: 0, isBot: false, name: 'YOU', hpBonus: RULES.playerHpBonus }];
@@ -103,7 +104,7 @@ export class MatchMode {
     this.view.onEvent = (e, w) => this.onEvent(e, w);
     if (ctx.audio) ctx.audio.spatialReverb = f.spatialReverb;
 
-    this.hud = new Hud(ctx.ui);
+    this.hud = new Hud(ctx.ui, ctx.input.bindings);
     this.hud.setMinimap(f.minimap ? this.world.map : null);
     this.adaptive = new AdaptiveQuality(ctx.quality, (q, _lvl, reason) => {
       this.renderer.applyQuality(q, f);
@@ -112,12 +113,12 @@ export class MatchMode {
 
     this.pauseEl = document.createElement('div');
     this.pauseEl.className = 'screen dim';
-    this.pauseEl.innerHTML = `<div class="card" style="min-width:360px;text-align:center"><h2>${t('paused')}</h2><div style="text-align:left;margin-bottom:12px">${controlsGridHtml()}</div>
-      <div class="menu" style="margin-top:10px"><button class="primary" data-a="resume">${t('clickToResume')}</button><button data-a="quit">${t('backToTitle')}</button></div></div>`;
+    this.renderPause();
     this.pauseEl.hidden = true;
     this.pauseEl.addEventListener('click', (ev) => {
       const a = (ev.target as HTMLElement).closest('button')?.dataset.a;
       if (a === 'quit') this.onQuit();
+      else if (a === 'settings') this.onSettings();
       else void ctx.input.lockPointer();
     });
     ctx.ui.append(this.pauseEl);
@@ -130,15 +131,31 @@ export class MatchMode {
     this.hud.showBanner(`${t('round')} 1`, t('objective'), PALETTE.teams.attackers, 3.5);
   }
 
+  private renderPause(): void {
+    this.pauseEl.innerHTML = `<div class="card" style="min-width:360px;text-align:center"><h2>${t('paused')}</h2><div style="text-align:left;margin-bottom:12px">${controlsGridHtml(this.ctx.input.bindings)}</div>
+      <div class="menu" style="margin-top:10px"><button class="primary" data-a="resume">${t('clickToResume')}</button><button data-a="settings">${t('settings')}</button><button data-a="quit">${t('backToTitle')}</button></div></div>`;
+  }
+
+  /** Called after the settings screen closed (bindings may have changed). */
+  refreshBindings(): void {
+    this.hud.setBindings(this.ctx.input.bindings);
+    this.renderPause();
+  }
+
+  /** Hide the pause card while the settings screen is open over the match. */
+  setOverlayHidden(hidden: boolean): void {
+    this.pauseEl.style.visibility = hidden ? 'hidden' : '';
+  }
+
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (e.code === 'Tab' || e.code === 'F1') {
+    if (this.ctx.input.actionOf(e.code) === 'help') {
       e.preventDefault();
       this.hud.showControls(true);
     }
   };
 
   private readonly onKeyUp = (e: KeyboardEvent): void => {
-    if (e.code === 'Tab' || e.code === 'F1') this.hud.showControls(false);
+    if (this.ctx.input.actionOf(e.code) === 'help') this.hud.showControls(false);
   };
 
   private applyMood(round: number): void {

@@ -10,7 +10,7 @@
 | 3 | 反動の跳ね方と戻り | 壁に向かって連射 | `src/config/weapons.ts` `recoil.pattern / recovery / viewFollow` |
 | 4 | 撃った感触（マズルフラッシュ・揺れ・音） | 連射 | `feel.ts` `kick`, `config/audio.ts` `weapon.*` |
 | 5 | 移動速度・止まる速さ | WASD・Shift・Ctrl | `config/movement.ts` |
-| 6 | 感度の初期値 | 設定画面 | `config/input.ts` `defaultSensitivity` |
+| 6 | 感度・キーの初期値（プレイヤーは「設定 → キー設定」で変更可） | 設定画面 | `config/input.ts` |
 | 7 | 敵の見やすさ（チーム色・遠距離での視認性） | サイトで撃ち合う | `config/visuals.ts` `PALETTE.teams` |
 | 8 | 時間帯ごとの色（昼・夕方・夕暮れ）が暗すぎないか | ラウンドを進める | `visuals.ts` `LIGHTING_MOODS` |
 | 9 | スモークの濃さ・色・中に入った時の白さ | Q で投げる・中に入る | `visuals.ts` `FX_STYLE.smoke`, `render/smoke-viz.ts` の alpha |

@@ -159,3 +159,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ctl-hint { position: absolute; left: 14px; bottom: 14px; font-size: 12px; color: var(--dim); letter-spacing: 0.1em; background: rgba(0,0,0,0.35); padding: 4px 8px; }
 .hud.lite .ctl-hint { display: none; }
 .notice { position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); font-size: 15px; letter-spacing: 0.08em; color: #ffd27a; background: rgba(0,0,0,0.45); padding: 3px 10px; opacity: 0; white-space: nowrap; }
+.settings-card { max-height: 92vh; overflow-y: auto; min-width: 640px; }
+.kb-title { margin: 22px 0 4px; font-size: 15px; letter-spacing: 0.25em; color: var(--def); }
+.kb-help { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
+.kb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; }
+.kb-row { display: grid; grid-template-columns: 1fr 92px 92px; gap: 6px; align-items: center; font-size: 14px; }
+.kb-row.unbound span { color: var(--bad); }
+.kb-slot { background: rgba(255,255,255,0.06); border: 1px solid var(--line); padding: 5px 4px; font-size: 13px; font-weight: 700; min-height: 30px; }
+.kb-slot.empty { color: var(--dim); font-weight: 400; }
+.kb-slot:hover { border-color: var(--def); }
+.kb-slot.capturing { background: var(--atk); color: #1a1104; border-color: var(--atk); animation: pulse 0.8s infinite; }
+.kb-msg { min-height: 18px; font-size: 13px; color: var(--atk); margin-top: 8px; }

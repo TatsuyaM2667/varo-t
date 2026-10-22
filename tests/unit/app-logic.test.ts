@@ -53,6 +53,15 @@ describe('settings', () => {
     expect(s.sensitivity).toBeLessThanOrEqual(3);
     expect(s.quality).toBe('auto');
     expect(s.volume).toBe(DEFAULT_SETTINGS.volume);
+    expect(s.bindings.fire).toEqual(['Mouse0']);
+  });
+
+  it('persists custom key bindings', () => {
+    const kv = memoryKV();
+    const s = loadSettings(kv);
+    s.bindings.jump = ['KeyJ'];
+    saveSettings(kv, s);
+    expect(loadSettings(kv).bindings.jump).toEqual(['KeyJ']);
   });
 });
 

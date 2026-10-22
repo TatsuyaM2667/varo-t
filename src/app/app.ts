@@ -77,6 +77,7 @@ export class App {
     this.quality = QUALITY_PRESETS[this.qualityName];
     this.features = this.withSafeMode(resolveFeatures(this.quality.features, params.get('f')));
     this.input.sensitivity = this.settings.sensitivity;
+    this.input.setBindings(this.settings.bindings);
     this.overlay = document.createElement('div');
     ui.append(this.overlay);
     this.fps = document.createElement('div');
@@ -237,6 +238,7 @@ export class App {
     this.audio?.ui('click');
     this.setScreen(
       howtoScreen(
+        this.settings.bindings,
         startable,
         () => this.startMatch(),
         () => this.goTitle(),
@@ -244,20 +246,24 @@ export class App {
     );
   }
 
-  private goSettings(): void {
-    this.state = 'settings';
+  /** Settings screen; `fromMatch` = opened from the pause menu over a running match. */
+  private goSettings(fromMatch = false): void {
+    if (!fromMatch) this.state = 'settings';
+    else this.match?.setOverlayHidden(true);
     this.setScreen(
       settingsScreen(
         this.settings,
-        (s) => {
+        this.input,
+        (s: Settings) => {
           const langChanged = s.lang !== this.settings.lang;
           const qualityChanged = s.quality !== this.settings.quality;
           this.settings = s;
           saveSettings(this.kv, s);
           this.input.sensitivity = s.sensitivity;
+          this.input.setBindings(s.bindings);
           this.audio?.setVolume(s.volume);
           setLang(s.lang);
-          if (qualityChanged) {
+          if (qualityChanged && !fromMatch) {
             this.qualityName = this.resolveQualityName();
             this.quality = QUALITY_PRESETS[this.qualityName];
             this.features = this.withSafeMode(resolveFeatures(this.quality.features, this.params.get('f')));
@@ -265,9 +271,20 @@ export class App {
             this.attract = null;
             this.ensureAttract();
           }
-          if (langChanged) this.goSettings();
+          if (qualityChanged && fromMatch) {
+            // applied when the next match starts
+            this.qualityName = this.resolveQualityName();
+            this.quality = QUALITY_PRESETS[this.qualityName];
+            this.features = this.withSafeMode(resolveFeatures(this.quality.features, this.params.get('f')));
+          }
+          if (langChanged) this.goSettings(fromMatch);
         },
-        () => this.goTitle(),
+        () => {
+          if (!fromMatch) return this.goTitle();
+          this.setScreen(null);
+          this.match?.refreshBindings();
+          this.match?.setOverlayHidden(false);
+        },
       ),
     );
   }
@@ -285,6 +302,7 @@ export class App {
       this.settings.difficulty,
       (r) => this.onMatchEnd(r),
       () => this.goTitle(),
+      () => this.goSettings(true),
     );
     this.input.enabled = this.input.pointerLocked;
     this.match.setPaused(!this.input.pointerLocked && !this.params.has('autostart'));

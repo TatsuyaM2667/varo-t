@@ -43,7 +43,7 @@ export class AttractMode {
     this.renderer.setMood(LIGHTING_MOODS[1 % LIGHTING_MOODS.length]);
     this.view = new WorldView(this.renderer, null, this.world);
     this.view.onEvent = (e) => this.onEvent(e);
-    this.hud = new Hud(ctx.ui);
+    this.hud = new Hud(ctx.ui, ctx.input.bindings);
     this.hud.setLite(true);
     this.hud.setMinimap(null);
     this.hud.setVisible(false);

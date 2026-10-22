@@ -1,24 +1,8 @@
 import { INPUT } from '../config/input';
 import { ANGLE_UNITS, wrapYaw } from '../sim/core/fmath';
-import { Btn, type InputFrame } from '../sim/input-frame';
+import type { InputFrame } from '../sim/input-frame';
 
-type Action = keyof typeof INPUT.keys;
-
-const ACTION_BUTTON: Partial<Record<Action, number>> = {
-  forward: Btn.Forward,
-  back: Btn.Back,
-  left: Btn.Left,
-  right: Btn.Right,
-  walk: Btn.Walk,
-  jump: Btn.Jump,
-  crouch: Btn.Crouch,
-  reload: Btn.Reload,
-  weapon1: Btn.Weapon1,
-  weapon2: Btn.Weapon2,
-  weapon3: Btn.Weapon3,
-  ability1: Btn.Ability1,
-  ability2: Btn.Ability2,
-};
+import { ACTIONS, ACTION_BUTTON, type Action, type Bindings, defaultBindings, isCtrlCode } from './bindings';
 
 const PITCH_LIMIT = (INPUT.pitchLimit / 360) * ANGLE_UNITS;
 
@@ -30,6 +14,10 @@ const PITCH_LIMIT = (INPUT.pitchLimit / 360) * ANGLE_UNITS;
  */
 export class InputManager {
   private readonly codeToButton = new Map<string, number>();
+  private readonly codeToAction = new Map<string, Action>();
+  bindings: Bindings = defaultBindings();
+  /** when set, every key/mouse press goes here instead of the game (key rebinding UI) */
+  capture: ((code: string) => void) | null = null;
   private held = 0;
   private latched = 0;
   private yaw = 0;
@@ -45,11 +33,7 @@ export class InputManager {
   keyboardLocked = false;
 
   constructor(private readonly target: HTMLElement) {
-    for (const [action, codes] of Object.entries(INPUT.keys) as [Action, readonly string[]][]) {
-      const btn = ACTION_BUTTON[action];
-      if (btn === undefined) continue;
-      for (const c of codes) this.codeToButton.set(c, btn);
-    }
+    this.setBindings(this.bindings);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('mousedown', this.onMouseDown);
@@ -67,6 +51,26 @@ export class InputManager {
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('blur', this.clear);
     window.removeEventListener('contextmenu', this.preventContext);
+  }
+
+  /** Apply a (validated) binding table; releases everything currently held. */
+  setBindings(b: Bindings): void {
+    this.bindings = b;
+    this.codeToButton.clear();
+    this.codeToAction.clear();
+    for (const a of ACTIONS) {
+      for (const code of b[a]) {
+        this.codeToAction.set(code, a);
+        const btn = ACTION_BUTTON[a];
+        if (btn !== undefined) this.codeToButton.set(code, btn);
+      }
+    }
+    this.clear();
+  }
+
+  /** Action bound to a key/mouse code (e.g. to detect the 'help' key). */
+  actionOf(code: string): Action | undefined {
+    return this.codeToAction.get(code);
   }
 
   get pointerLocked(): boolean {
@@ -88,17 +92,31 @@ export class InputManager {
     setTimeout(() => document.removeEventListener('pointerlockerror', retry), 2000);
   }
 
+  /** a lock request is in flight (a second one would fail with "Pointer lock pending") */
+  private locking = false;
+  /** raw mouse is unsupported on this platform (e.g. Linux): stop asking for it */
+  private static rawUnsupported = false;
+
   private async lockOnce(): Promise<void> {
-    if (this.pointerLocked) return;
+    if (this.pointerLocked || this.locking) return;
+    this.locking = true;
+    const req = this.target.requestPointerLock as (o?: unknown) => Promise<void> | undefined;
     try {
-      // Raw (unaccelerated) mouse where supported.
-      await (this.target.requestPointerLock as (o?: unknown) => Promise<void>).call(this.target, { unadjustedMovement: true });
-    } catch {
-      try {
-        await this.target.requestPointerLock();
-      } catch {
-        /* user gesture missing; the click handler will retry */
+      if (!InputManager.rawUnsupported) {
+        try {
+          // raw (unaccelerated) mouse where supported
+          await req.call(this.target, { unadjustedMovement: true });
+          return;
+        } catch (e) {
+          if ((e as Error)?.name === 'NotSupportedError') InputManager.rawUnsupported = true;
+          else throw e;
+        }
       }
+      await req.call(this.target);
+    } catch {
+      /* no user activation / window not focused: the click-to-resume overlay retries */
+    } finally {
+      this.locking = false;
     }
   }
 
@@ -137,11 +155,16 @@ export class InputManager {
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.markActivity();
+    if (this.capture) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.capture(e.code);
+      return;
+    }
     this.heldCodes.add(e.code);
     // block browser shortcuts (Ctrl+S save, Ctrl+D bookmark, …) while playing
     if (this.enabled && (e.ctrlKey || e.altKey || e.metaKey)) e.preventDefault();
-    const isCtrl = e.code === 'ControlLeft' || e.code === 'ControlRight';
-    if (isCtrl && !this.ctrlUsable()) return;
+    if (isCtrlCode(e.code) && !this.ctrlUsable()) return;
     const btn = this.codeToButton.get(e.code);
     if (btn !== undefined && this.enabled) {
       e.preventDefault();
@@ -160,19 +183,24 @@ export class InputManager {
 
   private readonly onMouseDown = (e: MouseEvent): void => {
     this.markActivity();
+    if (this.capture) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.capture(`Mouse${e.button}`);
+      return;
+    }
     if (!this.enabled || !this.pointerLocked) return;
-    if (e.button === 0) {
-      this.held |= Btn.Fire;
-      this.latched |= Btn.Fire;
-    } else if (e.button === 2) {
-      this.held |= Btn.Ads;
-      this.latched |= Btn.Ads;
+    const btn = this.codeToButton.get(`Mouse${e.button}`);
+    if (btn !== undefined) {
+      e.preventDefault();
+      this.held |= btn;
+      this.latched |= btn;
     }
   };
 
   private readonly onMouseUp = (e: MouseEvent): void => {
-    if (e.button === 0) this.held &= ~Btn.Fire;
-    else if (e.button === 2) this.held &= ~Btn.Ads;
+    const btn = this.codeToButton.get(`Mouse${e.button}`);
+    if (btn !== undefined) this.held &= ~btn;
   };
 
   private readonly onMouseMove = (e: MouseEvent): void => {

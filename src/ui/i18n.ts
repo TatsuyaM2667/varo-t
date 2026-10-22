@@ -52,6 +52,12 @@ const DICT = {
   blockedReload: { ja: 'リロード中…', en: 'Reloading…' },
   blockedEquip: { ja: '武器を構えています…', en: 'Equipping…' },
   emptyMag: { ja: '弾切れ — R でリロード', en: 'Empty — press R' },
+  keyBindings: { ja: 'キー設定', en: 'Key bindings' },
+  keyBindHelp: { ja: '枠をクリック → 割り当てたいキー（またはマウスボタン）を押す。Del で削除、Esc で取消。1つのキーは1つの操作にだけ割り当てられます。', en: 'Click a slot, then press a key or mouse button. Del clears, Esc cancels. Each key drives one action.' },
+  pressKey: { ja: 'キーを押す…', en: 'Press a key…' },
+  resetKeys: { ja: 'キーを初期設定に戻す', en: 'Reset keys' },
+  keyReserved: { ja: 'は割り当てられません（予約キー）', en: 'cannot be bound (reserved)' },
+  unbound: { ja: '未割り当て', en: 'Unbound' },
   touchpadHint: { ja: 'タッチパッドはキー入力中に無効になる場合があります。マウスの使用を推奨します', en: 'Touchpads may be disabled while typing — use a mouse' },
 } as const;
 

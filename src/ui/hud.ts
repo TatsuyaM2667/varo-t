@@ -4,6 +4,7 @@ import type { WeaponId } from '../config/weapons';
 import type { MapData } from '../sim/map/map-def';
 import { t } from './i18n';
 import { controlsGridHtml } from './screens';
+import { type Bindings, bindingLabel, keyLabel } from '../input/bindings';
 
 export interface HudModel {
   hp: number;
@@ -60,7 +61,7 @@ export class Hud {
   private last: Record<string, string> = {};
   private minimap: Minimap | null = null;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, bindings: Bindings) {
     const r = document.createElement('div');
     r.className = 'hud';
     r.innerHTML = `
@@ -81,19 +82,19 @@ export class Hud {
       <div class="smokefog" data-k="fog"></div>
       <div class="hurt" data-k="hurt"></div>
       <div class="banner"></div>
-      <div class="controls-ov" data-k="ctl" hidden><div class="card"><h2>${t('howto')}</h2>${controlsGridHtml()}</div></div>
-      <div class="ctl-hint">Tab / F1 : ${t('howto')}</div>
+      <div class="controls-ov" data-k="ctl" hidden><div class="card"><h2>${t('howto')}</h2><div data-k="ctlGrid"></div></div></div>
+      <div class="ctl-hint" data-k="ctlHint"></div>
       <div class="hud-bl">
         <div class="hp"><span data-k="hp">100</span><div class="hp-bar"><i data-k="hpBar"></i></div></div>
         <div class="abil">
-          <div class="ab" data-k="abQ"><b>Q</b><span>${BRAND.abilities.smoke}</span><em data-k="qDots"></em></div>
-          <div class="ab" data-k="abE"><b>E</b><span>${BRAND.abilities.dash}</span><em data-k="eCd"></em></div>
+          <div class="ab" data-k="abQ"><b data-k="keyQ"></b><span>${BRAND.abilities.smoke}</span><em data-k="qDots"></em></div>
+          <div class="ab" data-k="abE"><b data-k="keyE"></b><span>${BRAND.abilities.dash}</span><em data-k="eCd"></em></div>
         </div>
       </div>
       <div class="hud-br">
         <div class="ammo"><span class="mag" data-k="mag">25</span><span class="res" data-k="res">/ 75</span></div>
         <div class="wname" data-k="wname"></div>
-        <div class="slots"><span data-s="rifle">1 ${BRAND.weapons.rifle}</span><span data-s="sidearm">2 ${BRAND.weapons.sidearm}</span><span data-s="sniper">3 ${BRAND.weapons.sniper}</span></div>
+        <div class="slots"><span data-s="rifle"></span><span data-s="sidearm"></span><span data-s="sniper"></span></div>
         <div class="reload" data-k="reloadWrap"><i data-k="reload"></i></div>
       </div>`;
     parent.append(r);
@@ -108,6 +109,23 @@ export class Hud {
       dmg.append(a);
       this.dmgArcs.push(a);
     }
+    this.setBindings(bindings);
+  }
+
+  /** Refresh every on-screen key hint from the current bindings. */
+  setBindings(b: Bindings): void {
+    this.els.ctlGrid.innerHTML = controlsGridHtml(b);
+    this.els.ctlHint.textContent = `${bindingLabel(b, 'help')} : ${t('howto')}`;
+    this.els.keyQ.textContent = bindingLabel(b, 'ability1');
+    this.els.keyE.textContent = bindingLabel(b, 'ability2');
+    const first = (codes: string[]): string => (codes[0] ? keyLabel(codes[0]) : '—');
+    const slot = (sel: string, codes: string[], name: string): void => {
+      const el = this.root.querySelector(`[data-s="${sel}"]`);
+      if (el) el.textContent = `${first(codes)} ${name}`;
+    };
+    slot('rifle', b.weapon1, BRAND.weapons.rifle);
+    slot('sidearm', b.weapon2, BRAND.weapons.sidearm);
+    slot('sniper', b.weapon3, BRAND.weapons.sniper);
   }
 
   setMinimap(map: MapData | null): void {
