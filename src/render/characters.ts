@@ -3,9 +3,12 @@ import { FresnelParameters } from "@babylonjs/core/Materials/fresnelParameters";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import type { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Color3 as C3 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Bone } from "@babylonjs/core/Bones/bone";
+import { Skeleton } from "@babylonjs/core/Bones/skeleton";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
-import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import type { Scene } from "@babylonjs/core/scene";
 import {
@@ -398,17 +401,6 @@ function forearmPieces(p: Palette): Piece[] {
   ];
 }
 
-function forearmGlow(p: Palette): Piece[] {
-  return [
-    {
-      shape: "cyl",
-      size: [0.135, 0.02, 0.135],
-      pos: [0, 0, 0.1],
-      color: p.glow,
-    },
-  ];
-}
-
 /** Third-person guns, origin at the grip, barrel along +Z. */
 function gunPieces(p: Palette, w: WeaponId): Piece[] {
   const metal = c3("#22252b");
@@ -507,23 +499,40 @@ function gunGlow(p: Palette, w: WeaponId): Piece[] {
 
 // --------------------------------------------------------------- visual
 
+/** Bone order of the skinned body (one bone per rigid part). */
+const BONE = {
+  pelvis: 0,
+  torso: 1,
+  head: 2,
+  thigh: [3, 6],
+  shin: [4, 7],
+  foot: [5, 8],
+  upperArm: [9, 11],
+  forearm: [10, 12],
+} as const;
+const BONE_COUNT = 13;
+
+const tmpPos = new Vector3();
+const tmpDir = new Vector3();
+const tmpScale = new Vector3(1, 1, 1);
+const tmpQuat = new Quaternion();
+const UP = Vector3.Up();
+const FWD = Vector3.Forward();
+
+/**
+ * One combatant. The whole body is a single skinned mesh (plus one for its
+ * light strips): every rigid part is skinned 100 % to its own bone and the
+ * procedural animation/IK writes the bone transforms each frame. That keeps
+ * a character at ~5 draw calls instead of ~20 (8 bots used to cost ~150).
+ */
 class AgentVisual {
   /** every mesh (for visibility, fading and shadow casting) */
   readonly parts: Mesh[] = [];
   private readonly body: StandardMaterial;
   private readonly baseEmissive: Color3;
-  private readonly pelvis: Mesh;
-  private readonly torso: Mesh;
-  private readonly head: Mesh;
+  private readonly skeleton: Skeleton;
+  private readonly bones: Bone[];
   private readonly guns: Map<WeaponId, Mesh>;
-  private readonly legs: {
-    thigh: Mesh;
-    shin: Mesh;
-    foot: Mesh;
-    phaseOffset: number;
-    side: number;
-  }[];
-  private readonly arms: { upper: Mesh; fore: Mesh; side: number }[];
   private readonly blob: Mesh;
   private phase = 0;
   private flash = 0;
@@ -567,49 +576,82 @@ class AgentVisual {
       shared.glow.set(skin.glow, glow);
     }
 
-    const part = (
-      name: string,
-      pieces: Piece[],
-      glowPieces?: Piece[],
-    ): Mesh => {
-      const m = buildPart(scene, `${name}-${id}`, pieces, this.body);
-      m.receiveShadows = false;
-      this.parts.push(m);
-      if (glowPieces) {
-        const g = buildPart(scene, `${name}-glow-${id}`, glowPieces, glow!);
-        g.parent = m;
-        this.parts.push(g);
+    this.skeleton = new Skeleton(`skel-${id}`, `skel-${id}`, scene);
+    this.bones = Array.from({ length: BONE_COUNT }, (_, i) => new Bone(`b${i}`, this.skeleton, null, Matrix.Identity()));
+
+    const skinned = (name: string, groups: { bone: number; pieces: Piece[] }[], material: StandardMaterial): Mesh => {
+      let acc: VertexData | null = null;
+      for (const g of groups) {
+        const tmp = buildPart(scene, `${name}-tmp`, g.pieces, material);
+        const vd = VertexData.ExtractFromMesh(tmp, true, true);
+        tmp.dispose();
+        const n = vd.positions!.length / 3;
+        const idx = new Array<number>(n * 4).fill(0);
+        const wts = new Array<number>(n * 4).fill(0);
+        for (let i = 0; i < n; i++) {
+          idx[i * 4] = g.bone;
+          wts[i * 4] = 1;
+        }
+        vd.matricesIndices = idx;
+        vd.matricesWeights = wts;
+        if (acc) acc.merge(vd);
+        else acc = vd;
       }
+      const m = new Mesh(`${name}-${id}`, scene);
+      acc!.applyToMesh(m, false);
+      m.material = material;
+      m.skeleton = this.skeleton;
+      m.numBoneInfluencers = 1;
+      m.isPickable = false;
+      m.receiveShadows = false;
+      // bounds of a skinned mesh don't follow the bones: always draw (there are few)
+      m.alwaysSelectAsActiveMesh = true;
+      m.doNotSyncBoundingInfo = true;
+      this.parts.push(m);
       return m;
     };
 
-    this.pelvis = part("pelvis", pelvisPieces(pal));
-    this.torso = part("torso", torsoPieces(pal), torsoGlow(pal));
-    this.head = part("head", headPieces(pal, style), headGlow(pal, style));
-    this.guns = new Map(
-      (["rifle", "sidearm", "sniper"] as WeaponId[]).map((w) => [
-        w,
-        part(`gun-${w}`, gunPieces(pal, w), gunGlow(pal, w)),
-      ]),
+    skinned(
+      'body',
+      [
+        { bone: BONE.pelvis, pieces: pelvisPieces(pal) },
+        { bone: BONE.torso, pieces: torsoPieces(pal) },
+        { bone: BONE.head, pieces: headPieces(pal, style) },
+        ...[0, 1].flatMap((i) => [
+          { bone: BONE.thigh[i], pieces: thighPieces(pal) },
+          { bone: BONE.shin[i], pieces: shinPieces(pal) },
+          { bone: BONE.foot[i], pieces: footPieces(pal) },
+          { bone: BONE.upperArm[i], pieces: upperArmPieces(pal) },
+          { bone: BONE.forearm[i], pieces: forearmPieces(pal) },
+        ]),
+      ],
+      this.body,
     );
-    this.legs = [-1, 1].map((side, i) => ({
-      thigh: part("thigh", thighPieces(pal)),
-      shin: part("shin", shinPieces(pal)),
-      foot: part("foot", footPieces(pal)),
-      phaseOffset: i * Math.PI,
-      side,
-    }));
-    this.arms = [-1, 1].map((side) => ({
-      upper: part("uarm", upperArmPieces(pal)),
-      fore: part("farm", forearmPieces(pal), forearmGlow(pal)),
-      side,
-    }));
+    skinned(
+      'trim',
+      [
+        { bone: BONE.torso, pieces: torsoGlow(pal) },
+        { bone: BONE.head, pieces: headGlow(pal, style) },
+      ],
+      glow,
+    );
 
-    this.blob = CreateDisc(
-      `blob-${id}`,
-      { radius: 0.45, tessellation: 16 },
-      scene,
+    this.guns = new Map(
+      (['rifle', 'sidearm', 'sniper'] as WeaponId[]).map((w) => {
+        const g = buildPart(scene, `gun-${w}-${id}`, gunPieces(pal, w), this.body);
+        const t = buildPart(scene, `gun-${w}-glow-${id}`, gunGlow(pal, w), glow!);
+        t.parent = g;
+        for (const m of [g, t]) {
+          m.alwaysSelectAsActiveMesh = true;
+          m.doNotSyncBoundingInfo = true;
+          m.receiveShadows = false;
+          this.parts.push(m);
+        }
+        return [w, g] as [WeaponId, Mesh];
+      }),
     );
+
+    this.blob = CreateDisc(`blob-${id}`, { radius: 0.45, tessellation: 16 }, scene);
     this.blob.material = shared.blob;
     this.blob.rotation.x = Math.PI / 2;
     this.blob.isPickable = false;
@@ -627,13 +669,27 @@ class AgentVisual {
     }
   }
 
-  update(
-    p: AgentPose,
-    dt: number,
-    visible: boolean,
-    bvh: Bvh,
-    blobShadow: boolean,
-  ): void {
+  /** Place a bone: translation + rotation (+ optional Y scale). */
+  private pose(bone: number, x: number, y: number, z: number, q: Quaternion, scaleY = 1): void {
+    const b = this.bones[bone];
+    tmpScale.set(1, scaleY, 1);
+    b.setScale(tmpScale);
+    b.setRotationQuaternion(q);
+    b.setPosition(tmpPos.set(x, y, z));
+  }
+
+  /** Place a limb bone at joint `a`, pointing its +Z axis at joint `c`. */
+  private limb(bone: number, a: V3, c: V3): void {
+    tmpDir.set(c.x - a.x, c.y - a.y, c.z - a.z);
+    if (tmpDir.lengthSquared() < 1e-10) tmpDir.copyFrom(FWD);
+    tmpDir.normalize();
+    // avoid a degenerate basis when the limb points straight up/down
+    const up = Math.abs(tmpDir.y) > 0.98 ? FWD : UP;
+    Quaternion.FromLookDirectionLHToRef(tmpDir, up, tmpQuat);
+    this.pose(bone, a.x, a.y, a.z, tmpQuat);
+  }
+
+  update(p: AgentPose, dt: number, visible: boolean, bvh: Bvh, blobShadow: boolean): void {
     if (p.alive) {
       this.deadT = 0;
       this.wasAlive = true;
@@ -642,9 +698,7 @@ class AgentVisual {
       this.wasAlive = false;
       this.deadT = Math.min(3, this.deadT + dt);
     }
-    const fade = p.alive
-      ? 1
-      : Math.max(0, 1 - Math.max(0, this.deadT - 1.6) / 0.8);
+    const fade = p.alive ? 1 : Math.max(0, 1 - Math.max(0, this.deadT - 1.6) / 0.8);
     const show = visible && fade > 0.01;
     for (const m of this.parts) {
       m.isVisible = show;
@@ -660,11 +714,7 @@ class AgentVisual {
 
     this.flash = Math.max(0, this.flash - dt * 8);
     const b = this.baseEmissive;
-    this.body.emissiveColor.set(
-      b.r + this.flash * 0.9,
-      b.g + this.flash * 0.9,
-      b.b + this.flash * 0.9,
-    );
+    this.body.emissiveColor.set(b.r + this.flash * 0.9, b.g + this.flash * 0.9, b.b + this.flash * 0.9);
 
     const fx = Math.sin(p.yaw);
     const fz = Math.cos(p.yaw);
@@ -680,30 +730,23 @@ class AgentVisual {
     const mdx = speed > 0.1 ? p.vx / speed : fx;
     const mdz = speed > 0.1 ? p.vz / speed : fz;
 
-    const pelvisY =
-      p.y +
-      p.height * 0.53 -
-      death * (p.height * 0.4) +
-      (p.grounded ? Math.abs(Math.sin(this.phase)) * 0.035 * moveAmt : 0);
+    const pelvisY = p.y + p.height * 0.53 - death * (p.height * 0.4) + (p.grounded ? Math.abs(Math.sin(this.phase)) * 0.035 * moveAmt : 0);
     const lean = death * 1.35; // fall backwards
-    this.pelvis.position.set(p.x, pelvisY, p.z);
-    this.pelvis.rotation.set(0, p.yaw, 0);
+    this.pose(BONE.pelvis, p.x, pelvisY, p.z, Quaternion.RotationYawPitchRollToRef(p.yaw, 0, 0, tmpQuat));
 
     // torso pivots at the waist
     const torsoLen = p.height * 0.31;
     const tilt = -p.pitch * 0.25 + lean + (p.alive ? speed * 0.012 : 0);
     const waistY = pelvisY + 0.08;
-    this.torso.position.set(p.x, waistY, p.z);
-    this.torso.rotation.set(-tilt, p.yaw, 0);
-    this.torso.scaling.y = (torsoLen / TORSO_REF) * 1.0;
+    this.pose(BONE.torso, p.x, waistY, p.z, Quaternion.RotationYawPitchRollToRef(p.yaw, -tilt, 0, tmpQuat), torsoLen / TORSO_REF);
     const up = torsoLen * (0.54 / TORSO_REF);
-    const neck = new Vector3(
+    this.pose(
+      BONE.head,
       p.x - fx * Math.sin(tilt) * up,
       waistY + Math.cos(tilt) * up,
       p.z - fz * Math.sin(tilt) * up,
+      Quaternion.RotationYawPitchRollToRef(p.yaw, -p.pitch * 0.6 - tilt, 0, tmpQuat),
     );
-    this.head.position.copyFrom(neck);
-    this.head.rotation.set(-p.pitch * 0.6 - tilt, p.yaw, 0);
     this.blob.position.set(p.x, groundAt(bvh, p.x, p.y + 0.5, p.z) + 0.02, p.z);
 
     // gun held in front of the chest along the aim direction
@@ -714,54 +757,32 @@ class AgentVisual {
     const shoulderY = waistY + Math.cos(tilt) * up * 0.86;
     const chestX = p.x - fx * Math.sin(tilt) * up * 0.86;
     const chestZ = p.z - fz * Math.sin(tilt) * up * 0.86;
-    const gunBase = new Vector3(
-      chestX + rx * 0.12 + fx * 0.12,
-      shoulderY - 0.14,
-      chestZ + rz * 0.12 + fz * 0.12,
-    );
-    const gunLen =
-      p.weapon === "sniper" ? 1.0 : p.weapon === "sidearm" ? 0.28 : 0.7;
+    const gbx = chestX + rx * 0.12 + fx * 0.12;
+    const gby = shoulderY - 0.14;
+    const gbz = chestZ + rz * 0.12 + fz * 0.12;
+    const gunLen = p.weapon === 'sniper' ? 1.0 : p.weapon === 'sidearm' ? 0.28 : 0.7;
     const gun = this.guns.get(p.weapon)!;
-    gun.position.copyFrom(gunBase);
-    gun.lookAt(gunBase.add(new Vector3(ax, ay - death, az)));
-    this.muzzle.copyFrom(
-      gunBase.add(new Vector3(ax, ay, az).scale(gunLen * 0.95)),
-    );
+    gun.position.set(gbx, gby, gbz);
+    gun.lookAt(segTarget.set(gbx + ax, gby + ay - death, gbz + az));
+    this.muzzle.set(gbx + ax * gunLen * 0.95, gby + ay * gunLen * 0.95, gbz + az * gunLen * 0.95);
 
     // arms: right hand on the grip, left hand on the foregrip
-    for (const arm of this.arms) {
-      const sh = {
-        x: chestX + rx * 0.26 * arm.side,
-        y: shoulderY,
-        z: chestZ + rz * 0.26 * arm.side,
-      };
-      const reach = arm.side > 0 ? 0.0 : gunLen * 0.5;
-      const hand = {
-        x: gunBase.x + ax * reach,
-        y: gunBase.y + ay * reach - 0.02,
-        z: gunBase.z + az * reach,
-      };
-      const pole = {
-        x: sh.x + rx * arm.side * 0.4 - fx * 0.2,
-        y: sh.y - 0.6,
-        z: sh.z + rz * arm.side * 0.4 - fz * 0.2,
-      };
+    for (const [i, side] of [[0, -1], [1, 1]] as const) {
+      const sh = { x: chestX + rx * 0.26 * side, y: shoulderY, z: chestZ + rz * 0.26 * side };
+      const reach = side > 0 ? 0.0 : gunLen * 0.5;
+      const hand = { x: gbx + ax * reach, y: gby + ay * reach - 0.02, z: gbz + az * reach };
+      const pole = { x: sh.x + rx * side * 0.4 - fx * 0.2, y: sh.y - 0.6, z: sh.z + rz * side * 0.4 - fz * 0.2 };
       const s = solveTwoBone(sh, hand, UPPER_ARM, FOREARM, pole);
-      placeSegment(arm.upper, sh, s.knee);
-      placeSegment(arm.fore, s.knee, s.foot);
+      this.limb(BONE.upperArm[i], sh, s.knee);
+      this.limb(BONE.forearm[i], s.knee, s.foot);
     }
 
     // legs: planted feet with procedural stepping, ground found by raycast
-    for (const leg of this.legs) {
-      const hip = {
-        x: p.x + rx * 0.11 * leg.side,
-        y: pelvisY - 0.08,
-        z: p.z + rz * 0.11 * leg.side,
-      };
-      const ph = this.phase + leg.phaseOffset;
+    for (const [i, side] of [[0, -1], [1, 1]] as const) {
+      const hip = { x: p.x + rx * 0.11 * side, y: pelvisY - 0.08, z: p.z + rz * 0.11 * side };
+      const ph = this.phase + i * Math.PI;
       const swing = Math.cos(ph) * 0.38 * moveAmt * (stride / 1.5);
-      const lift =
-        Math.max(0, Math.sin(ph)) * 0.2 * moveAmt * (p.grounded ? 1 : 0);
+      const lift = Math.max(0, Math.sin(ph)) * 0.2 * moveAmt * (p.grounded ? 1 : 0);
       const fxw = hip.x + mdx * swing;
       const fzw = hip.z + mdz * swing;
       let gy = groundAt(bvh, fxw, p.y + 0.5, fzw);
@@ -769,25 +790,23 @@ class AgentVisual {
       const footTarget = { x: fxw, y: gy + 0.08 + lift, z: fzw };
       const pole = { x: hip.x + fx * 1.2, y: hip.y - 0.3, z: hip.z + fz * 1.2 };
       const s = solveTwoBone(hip, footTarget, THIGH, SHIN, pole);
-      placeSegment(leg.thigh, hip, s.knee);
-      placeSegment(leg.shin, s.knee, s.foot);
-      leg.foot.position.set(s.foot.x, s.foot.y, s.foot.z);
-      leg.foot.rotation.set(0, p.yaw, 0);
+      this.limb(BONE.thigh[i], hip, s.knee);
+      this.limb(BONE.shin[i], s.knee, s.foot);
+      this.pose(BONE.foot[i], s.foot.x, s.foot.y, s.foot.z, Quaternion.RotationYawPitchRollToRef(p.yaw, 0, 0, tmpQuat));
     }
   }
 
   dispose(): void {
     for (const p of this.parts) p.dispose();
+    this.skeleton.dispose();
     this.blob.dispose();
     this.body.dispose();
   }
 }
 
 /** Limb meshes start at their parent joint and point along +Z. */
-function placeSegment(m: Mesh, a: V3, b: V3): void {
-  m.position.set(a.x, a.y, a.z);
-  m.lookAt(new Vector3(b.x, b.y, b.z));
-}
+const segTarget = new Vector3();
+
 
 function groundAt(bvh: Bvh, x: number, fromY: number, z: number): number {
   const hit = bvh.raycast(x, fromY, z, 0, -1, 0, 1.6);
