@@ -132,11 +132,18 @@ export class AttractMode {
       this.focusTimer = 8;
     }
     if (!this.bots || alive.length === 0 || w.round.phase === 'prep') {
-      // cinematic orbit around the site
+      // cinematic orbit around the site, pulled in front of any wall in the way
       const a = this.time * 0.08;
-      const r = 26;
       const s = w.map.relay;
-      target = { x: s.x + Math.sin(a) * r, y: 9, z: s.z + Math.cos(a) * r, yaw: a + Math.PI, pitch: -0.28 };
+      const cy = s.y + 7;
+      const dx = Math.sin(a);
+      const dz = Math.cos(a);
+      const dy = (cy - (s.y + 2)) / 18;
+      const len = Math.hypot(dx, dy, dz);
+      const hit = w.bvh.raycast(s.x, s.y + 2, s.z, dx / len, dy / len, dz / len, 18 * len);
+      const r = hit ? Math.max(4, (hit.t / len) - 1.2) : 18;
+      const camY = s.y + 2 + dy * r;
+      target = { x: s.x + dx * r, y: camY, z: s.z + dz * r, yaw: a + Math.PI, pitch: -Math.atan2(camY - s.y - 1, r) };
       if (this.lastFocus !== -2) this.cam.snap(target);
       else this.cam.follow(target, dt, 2);
       this.lastFocus = -2;
