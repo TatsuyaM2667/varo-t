@@ -21,7 +21,7 @@ describe('module boundaries', () => {
       for (const m of src.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
         const spec = m[1];
         expect(spec.startsWith('.'), `${relative(ROOT, f)} imports package '${spec}'`).toBe(true);
-        const target = relative(ROOT, resolve(dirname(f), spec));
+        const target = relative(ROOT, resolve(dirname(f), spec)).replace(/\\/g, '/');
         expect(target.startsWith('src/sim') || target.startsWith('src/config'), `${relative(ROOT, f)} -> ${target}`).toBe(true);
       }
     }

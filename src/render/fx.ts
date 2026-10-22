@@ -110,7 +110,9 @@ export class Fx {
       this.tracers.push({ mesh: m, from: new Vector3(), to: new Vector3(), t: 1, len: 0 });
     }
     const gpuOk = opts.gpu && GPUParticleSystem.IsSupported;
-    for (let i = 0; i < 6; i++) this.sparkPools.push(this.makeSparks(i, gpuOk));
+    // Always use CPU ParticleSystem for sparks: GPUParticleSystem recycles particles
+    // endlessly on the GPU with manualEmitCount, causing sparks to float in mid-air.
+    for (let i = 0; i < 6; i++) this.sparkPools.push(this.makeSparks(i));
     this.decalMat = new StandardMaterial('decal-mat', scene);
     this.decalMat.diffuseTexture = bulletHoleTexture(scene);
     this.decalMat.useAlphaFromDiffuseTexture = true;
@@ -118,10 +120,8 @@ export class Fx {
     this.decalMat.zOffset = -2;
     this.decalMat.backFaceCulling = true;
     this.buildDust(mapBounds, gpuOk);
-    // compile spark shaders now (under the floor) instead of on the first shot
     for (const ps of this.sparkPools) {
       ps.emitter = new Vector3(0, -50, 0);
-      ps.manualEmitCount = 1;
     }
     for (const [k, hex] of Object.entries({ wood: '#9a6a3a', glass: FX_STYLE.glass, crate: '#d98a3d', concrete: '#a39e95' })) {
       const m = new StandardMaterial(`chunk-${k}`, scene);
@@ -145,9 +145,9 @@ export class Fx {
     if (!o.decals) for (const d of this.decals) d.isVisible = false;
   }
 
-  private makeSparks(i: number, gpu: boolean): IParticleSystem {
+  private makeSparks(i: number): IParticleSystem {
     const cap = 120;
-    const ps: IParticleSystem = gpu ? new GPUParticleSystem(`sparks-${i}`, { capacity: cap }, this.scene) : new ParticleSystem(`sparks-${i}`, cap, this.scene);
+    const ps = new ParticleSystem(`sparks-${i}`, cap, this.scene);
     ps.particleTexture = this.sprite;
     ps.emitter = new Vector3(0, -100, 0);
     ps.minSize = 0.025;
@@ -272,14 +272,22 @@ export class Fx {
         continue;
       }
       const speed = 380;
-      const head = Math.min(tr.len, tr.t * tr.len + speed * dt);
-      tr.t = tr.len > 0 ? head / tr.len : 1;
-      if (tr.t >= 0.999) tr.t = 1;
+      const head = tr.t * tr.len + speed * dt;
+      if (head >= tr.len || tr.len <= 0.05) {
+        tr.t = 1;
+        tr.mesh.isVisible = false;
+        continue;
+      }
+      tr.t = head / tr.len;
       const segLen = Math.min(2.5, head);
+      if (segLen <= 0.05) {
+        tr.mesh.isVisible = false;
+        continue;
+      }
       const dir = tr.to.subtract(tr.from).normalize();
       const h = tr.from.add(dir.scale(head));
       const tail = h.subtract(dir.scale(segLen));
-      tr.mesh.isVisible = segLen > 0.05;
+      tr.mesh.isVisible = true;
       tr.mesh.position.copyFrom(h.add(tail).scale(0.5));
       tr.mesh.scaling.z = segLen;
       tr.mesh.lookAt(h);

@@ -41,6 +41,7 @@ export class InputManager {
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('blur', this.clear);
     window.addEventListener('contextmenu', this.preventContext);
+    window.addEventListener('compositionstart', this.preventIme);
   }
 
   dispose(): void {
@@ -51,6 +52,7 @@ export class InputManager {
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('blur', this.clear);
     window.removeEventListener('contextmenu', this.preventContext);
+    window.removeEventListener('compositionstart', this.preventIme);
   }
 
   /** Apply a (validated) binding table; releases everything currently held. */
@@ -107,9 +109,10 @@ export class InputManager {
           // raw (unaccelerated) mouse where supported
           await req.call(this.target, { unadjustedMovement: true });
           return;
-        } catch (e) {
-          if ((e as Error)?.name === 'NotSupportedError') InputManager.rawUnsupported = true;
-          else throw e;
+        } catch {
+          // If unadjustedMovement fails or is unsupported/conflicts on this system,
+          // cleanly fall back to standard pointer lock.
+          InputManager.rawUnsupported = true;
         }
       }
       await req.call(this.target);
@@ -121,8 +124,8 @@ export class InputManager {
   }
 
   setLook(yawUnits: number, pitchUnits: number): void {
-    this.yaw = yawUnits;
-    this.pitch = pitchUnits;
+    if (Number.isFinite(yawUnits)) this.yaw = yawUnits;
+    if (Number.isFinite(pitchUnits)) this.pitch = pitchUnits;
   }
 
   /** Fractional look angles for the camera (no tick quantisation lag). */
@@ -169,7 +172,7 @@ export class InputManager {
     if (btn !== undefined && this.enabled) {
       e.preventDefault();
       this.held |= btn;
-      this.latched |= btn;
+      if (!e.repeat) this.latched |= btn;
     } else if (e.code === 'Tab' || e.code === 'Space') {
       e.preventDefault();
     }
@@ -206,9 +209,17 @@ export class InputManager {
   private readonly onMouseMove = (e: MouseEvent): void => {
     this.markActivity();
     if (!this.enabled || !this.pointerLocked) return;
-    const unitsPerCount = ((INPUT.degreesPerCount * this.sensitivity * this.lookScale) / 360) * ANGLE_UNITS;
-    this.yaw += e.movementX * unitsPerCount;
-    this.pitch -= e.movementY * unitsPerCount * (INPUT.invertY ? -1 : 1);
+    const mx = Number.isFinite(e.movementX) ? e.movementX : 0;
+    const my = Number.isFinite(e.movementY) ? e.movementY : 0;
+    if (mx === 0 && my === 0) return;
+    const scale = Number.isFinite(this.lookScale) && this.lookScale > 0 ? this.lookScale : 1;
+    const sens = Number.isFinite(this.sensitivity) && this.sensitivity > 0 ? this.sensitivity : INPUT.defaultSensitivity;
+    const unitsPerCount = ((INPUT.degreesPerCount * sens * scale) / 360) * ANGLE_UNITS;
+    if (!Number.isFinite(unitsPerCount)) return;
+    this.yaw += mx * unitsPerCount;
+    this.pitch -= my * unitsPerCount * (INPUT.invertY ? -1 : 1);
+    if (!Number.isFinite(this.yaw)) this.yaw = 0;
+    if (!Number.isFinite(this.pitch)) this.pitch = 0;
     if (this.pitch > PITCH_LIMIT) this.pitch = PITCH_LIMIT;
     if (this.pitch < -PITCH_LIMIT) this.pitch = -PITCH_LIMIT;
   };
@@ -220,4 +231,10 @@ export class InputManager {
   };
 
   private readonly preventContext = (e: Event): void => e.preventDefault();
+
+  private readonly preventIme = (): void => {
+    if (this.enabled && this.pointerLocked) {
+      this.target.focus();
+    }
+  };
 }
