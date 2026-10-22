@@ -23,19 +23,28 @@ input (DOM) ──► InputFrame (per tick, quantised) ──► World.step()  �
 - Hitscan: ray vs BVH + per-agent head/body/legs boxes (crouch shrinks them).
 - Havok (`@babylonjs/havok`, MIT) is cosmetic only: debris from destroyed crates/glass. Loaded lazily when `destructibles` is on.
 
+## Maps
+- Stage maps are ASCII grids in `sim/map/stages.ts` (legend in `sim/map/spec.ts`), one per difficulty, laid out as a forward push: attacker spawn (south) → approach with forward defender posts → three lanes → a single site (north).
+- `buildFromSpec` produces colliders (walls merged per district, terrace levels, archway lintels, roofs, cover), tactics (entrances, site/forward posts, attack routes derived from markers) and render-only visual data (district floor finishes, props).
+- Every district has a wall and floor colour; nearest-district tints are assigned by BFS so walls take the colour of the area they face.
+- `sim/map/registry.ts` maps ids to builders and defines the stages (map, difficulty, default enemy count). The World takes `mapId`; replays carry it in their options.
+- Validation: `tests/unit/stages.test.ts` (spawns, reachability of the relay/posts/routes, sight lines) and `tools/validate-map.ts`.
+
 ## Navigation
 - Deterministic 1 m walkability grid + A* with string pulling (`sim/bots/nav.ts`). **Deviation from the plan:** Recast was replaced because a WASM navmesh inside the sim would make headless self-play and bit-exact replays depend on WASM/async loading; the grid is exact, fast (≈30k sim ticks/s with bots) and needs no assets.
 
 ## Bots
 - Perception: FOV cone, line of sight (glass/smoke aware), smoke optical depth along the sight line, reaction delay (shorter when the enemy appears where expected), hearing of footsteps/gunshots/abilities (halved through walls), being shot reveals the attacker.
 - Decision: utility scores (engage / retreat-to-cover / investigate / hold post / rotate / retake / push / capture) re-evaluated at 10 Hz; Tier 0 FSM when `botUtilityAi` is off.
-- Tactics data (`sim/bots/tactics.ts`): crossfire post pairs per entrance, attack routes, smoke targets.
+- Tactics data come from each map (`MapData.tactics`): entrances with smoke spots, site posts and forward posts, attack routes. Defenders get distinct posts (≈40 % forward posts, the rest spread over the entrances).
+- Movement: 8-way input is dithered (alternating the two nearest directions) so bots follow paths at any angle; paths carry a wall-clearance cost; a stuck bot sidesteps toward open space, jumps, and re-routes. `tools/stuck-probe.ts` measures it.
 - Difficulty = reaction time, aim error (+ settle), coordination; multipliers tuned by self-play.
 
 ## Rendering (`src/render`)
 - WebGPU first, WebGL2 fallback (`?engine=webgl`). Tree-shaken Babylon 9 deep imports; engine extensions registered in `render/engine.ts`.
 - Map: merged greybox meshes with world-space UVs and procedural textures; destructibles as separate meshes.
-- Characters: primitive meshes + analytic two-bone IK for legs (ground raycast, gait phase) and arms (hands on the gun).
+- Characters: one skinned mesh per agent built from vertex-coloured primitives (one bone per rigid part); the analytic two-bone IK for legs (ground raycast, gait phase) and arms (hands on the gun) writes bone transforms each frame. ~5 draw calls per agent.
+- Stage architecture (`render/architecture.ts`): per-district floor finishes, baseboards/cornices, windows and floor bands on buildings, arch frames, roof beams, trees, stalls, barrels, lamps, banners and the site marking — batched into a few meshes per theme (`config/themes.ts`).
 - Viewmodel: primitives in rendering group 1 (never clips), spring-damper recoil, sway, bob, ADS blend, star-burst muzzle flash.
 - Effects: pooled tracers, spark bursts (GPU particles; compute shaders under WebGPU), decals, ambient dust, smoke billboards bound to the sim's density puffs.
 - Post: FXAA, bloom, ACES tone mapping, sharpen, SSAO2 (WebGL2 only: under WebGPU this Babylon build fails to bind its noise sampler), volumetric sun shafts (Ultra), damage chromatic aberration.

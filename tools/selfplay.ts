@@ -27,6 +27,7 @@ import { eyeHeight } from "../src/sim/entities/agent";
 import { Btn, type InputFrame } from "../src/sim/input-frame";
 import { zoneAt } from "../src/sim/map/map-def";
 import { type AgentSpec, World } from "../src/sim/world";
+import { type MapId, STAGES, type StageDef } from "../src/sim/map/registry";
 
 // ---------------------------------------------------------------- jobs
 
@@ -38,7 +39,7 @@ type Job =
       seeds: number[];
       control: boolean;
     }
-  | { kind: "rounds"; roster: AgentSpec[]; seeds: number[] };
+  | { kind: "rounds"; roster: AgentSpec[]; seeds: number[]; mapId: MapId };
 
 interface DuelResult {
   ttk: number[]; // seconds, Infinity = no kill within 5 s
@@ -133,6 +134,7 @@ function runRounds(job: Extract<Job, { kind: "rounds" }>): RoundsResult {
   };
   for (const seed of job.seeds) {
     const w = new World({
+      mapId: job.mapId,
       seed,
       roster: job.roster,
       features: { utilityAi: true, destructibles: true },
@@ -248,14 +250,14 @@ const VISITOR: BotProfile = {
   stopToShoot: 0.4,
 };
 
-/** Target probability that the visitor wins a round against three bots. */
+/** Target probability that the visitor wins a round on each stage (1 vs the stage's enemy count). */
 const TARGETS: Record<Difficulty, number> = {
-  easy: 0.5,
-  normal: 0.3,
+  easy: 0.45,
+  normal: 0.28,
   hard: 0.15,
 };
 
-function exhibitRoster(diff: Difficulty, mul: number): AgentSpec[] {
+function exhibitRoster(diff: Difficulty, mul: number, enemies: number): AgentSpec[] {
   const prof = applyTuning(BASE_BOT_PROFILES[diff], {
     reactionMul: mul,
     aimErrorMul: mul,
@@ -268,7 +270,7 @@ function exhibitRoster(diff: Difficulty, mul: number): AgentSpec[] {
       difficulty: "normal",
       profile: VISITOR,
     },
-    ...[0, 1, 2].map((i): AgentSpec => ({
+    ...Array.from({ length: enemies }, (_, i): AgentSpec => ({
       team: 1,
       isBot: true,
       name: `bot${i}`,
@@ -279,7 +281,7 @@ function exhibitRoster(diff: Difficulty, mul: number): AgentSpec[] {
 }
 
 async function visitorWinRate(
-  diff: Difficulty,
+  stage: StageDef,
   mul: number,
   rounds: number,
   seedBase: number,
@@ -288,8 +290,9 @@ async function visitorWinRate(
     await runPool<RoundsResult>(
       chunked(seedBase, rounds, 25).map((s) => ({
         kind: "rounds",
-        roster: exhibitRoster(diff, mul),
+        roster: exhibitRoster(stage.difficulty, mul, stage.enemies),
         seeds: s,
+        mapId: stage.map,
       })),
     ),
   );
@@ -348,63 +351,45 @@ async function main(): Promise<void> {
   }
   log();
 
-  // 2) map side balance with equal bots
-  const sideRounds = quick ? 60 : 600;
-  log(`## 2. Map side balance (3v3, normal vs normal, ${sideRounds} rounds)`);
+  // 2) map side balance with equal bots, per map
+  const sideRounds = quick ? 60 : 400;
+  log(`## 2. Map side balance (3v3, normal vs normal, ${sideRounds} rounds per map)`);
   log();
-  const side = mergeRounds(
-    await runPool<RoundsResult>(
-      chunked(1000, sideRounds, 25).map((s) => ({
-        kind: "rounds",
-        roster: [0, 1].flatMap((team) =>
-          [0, 1, 2].map((i): AgentSpec => ({
-            team: team as 0 | 1,
-            isBot: true,
-            name: `t${team}${i}`,
-            difficulty: "normal",
-          })),
-        ),
-        seeds: s,
-      })),
-    ),
-  );
-  log(
-    `- Attacker round win rate: **${pct(side.wins[0] / side.rounds)}** (${side.wins[0]}/${side.rounds})`,
-  );
-  log(
-    `- Win reasons: ${Object.entries(side.reasons)
-      .map(([k, v]) => `${k} ${pct(v / side.rounds)}`)
-      .join(", ")}`,
-  );
-  log(`- Median round length: ${median(side.durations).toFixed(1)} s`);
-  log(
-    `- Headshot share of kills: ${pct(side.headshotKills / Math.max(1, side.kills))}`,
-  );
-  log(
-    `- Kills by weapon: ${Object.entries(side.killsByWeapon)
-      .map(([k, v]) => `${k} ${pct(v / side.kills)}`)
-      .join(", ")}`,
-  );
+  log("| map | attacker win rate | elimination / capture / time | median round | most kills in |");
+  log("|---|---|---|---|---|");
+  for (const mapId of ["yard", ...STAGES.map((st) => st.map)] as MapId[]) {
+    const side = mergeRounds(
+      await runPool<RoundsResult>(
+        chunked(1000, sideRounds, 25).map((s) => ({
+          kind: "rounds",
+          mapId,
+          roster: [0, 1].flatMap((team) =>
+            [0, 1, 2].map((i): AgentSpec => ({
+              team: team as 0 | 1,
+              isBot: true,
+              name: `t${team}${i}`,
+              difficulty: "normal",
+            })),
+          ),
+          seeds: s,
+        })),
+      ),
+    );
+    const r = (k: string): string => pct((side.reasons[k] ?? 0) / Math.max(1, side.rounds));
+    const topZones = Object.entries(side.killsByZone)
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 3)
+      .map(([z, v]) => `${z} ${pct(v / Math.max(1, side.kills))}`)
+      .join(", ");
+    log(`| ${mapId} | **${pct(side.wins[0] / Math.max(1, side.rounds))}** | ${r("elimination")} / ${r("capture")} / ${r("time")} | ${median(side.durations).toFixed(1)} s | ${topZones} |`);
+  }
   log();
-  log("| zone | share of kills |");
-  log("|---|---|");
-  for (const [z, v] of Object.entries(side.killsByZone).sort(
-    (a, b) => b[1] - a[1],
-  ))
-    log(`| ${z} | ${pct(v / side.kills)} |`);
-  log();
-  const sideNote =
-    Math.abs(side.wins[0] / side.rounds - 0.5) < 0.08
-      ? "Within ±8% of 50% — the layout is balanced for equal teams."
-      : side.wins[0] / side.rounds > 0.5
-        ? "Attackers are favoured; consider more defender cover near the chokes or a shorter capture window."
-        : "Defenders are favoured; consider a longer round or more attacker cover on the approaches.";
-  log(`> ${sideNote}`);
+  log("> 50 % ± 8 % means the layout is balanced for equal teams. Attackers above that: more defender cover at the chokes or a longer capture; below: more attacker cover on the approaches.");
   log();
 
   // 3) exhibition difficulty: visitor proxy vs 3 bots, auto-tuned
   const perEval = quick ? 50 : 200;
-  log(`## 3. Exhibition difficulty (visitor proxy vs 3 bots)`);
+  log(`## 3. Exhibition difficulty (visitor proxy vs each stage's enemies, on that stage)`);
   log();
   log(
     'The "visitor" is a bot profile modelling a first-time player (reaction 430 ms, aim error 4°, solo).',
@@ -413,8 +398,8 @@ async function main(): Promise<void> {
     "Each difficulty is tuned by bisection on a multiplier applied to reaction time and aim error, toward a target round-win rate for the visitor.",
   );
   log();
-  log("| difficulty | target | before (×1.00) | tuned multiplier | after |");
-  log("|---|---|---|---|---|");
+  log("| stage | difficulty | enemies | target | before (×1.00) | tuned multiplier | after |");
+  log("|---|---|---|---|---|---|---|");
   const tuning: Record<
     Difficulty,
     { reactionMul: number; aimErrorMul: number }
@@ -423,17 +408,18 @@ async function main(): Promise<void> {
     normal: { reactionMul: 1, aimErrorMul: 1 },
     hard: { reactionMul: 1, aimErrorMul: 1 },
   };
-  for (const diff of ["easy", "normal", "hard"] as Difficulty[]) {
+  for (const stage of STAGES) {
+    const diff = stage.difficulty;
     const target = TARGETS[diff];
-    const before = await visitorWinRate(diff, 1, perEval, 5000);
+    const before = await visitorWinRate(stage, 1, perEval, 5000);
     // larger multiplier = slower, sloppier bots = higher visitor win rate
     let lo = 0.5;
-    let hi = 2.5;
+    let hi = 8;
     let best = { mul: 1, rate: before.rate };
     for (let it = 0; it < (quick ? 3 : 6); it++) {
       const mid = Math.sqrt(lo * hi);
       const { rate } = await visitorWinRate(
-        diff,
+        stage,
         mid,
         perEval,
         6000 + it * 1000,
@@ -443,13 +429,13 @@ async function main(): Promise<void> {
       if (rate < target) lo = mid;
       else hi = mid;
     }
-    const verify = await visitorWinRate(diff, best.mul, perEval * 2, 9000);
+    const verify = await visitorWinRate(stage, best.mul, perEval * 2, 9000);
     tuning[diff] = {
       reactionMul: +best.mul.toFixed(3),
       aimErrorMul: +best.mul.toFixed(3),
     };
     log(
-      `| ${diff} | ${pct(target)} | ${pct(before.rate)} | ×${best.mul.toFixed(2)} | ${pct(verify.rate)} |`,
+      `| ${stage.map} | ${diff} | ${stage.enemies} | ${pct(target)} | ${pct(before.rate)} | ×${best.mul.toFixed(2)} (reaction ${Math.round(BASE_BOT_PROFILES[diff].reactionMs * best.mul)} ms, aim error ${(BASE_BOT_PROFILES[diff].aimErrorDeg * best.mul).toFixed(1)}°) | ${pct(verify.rate)} |`,
     );
   }
   log();

@@ -54,3 +54,9 @@
 - 既知の制約: SSAO は WebGL2 のみ（WebGPU では Babylon 9.31 の SSAO2 が描画時に例外）。
 - WebGPU 注意: `scene.ambientColor` を設定すると PBR のマップが真っ黒になる。ParticleSystem.dispose() は共有テクスチャを壊すので dispose(false)。
 - テスト用フック: `window.__game`（app / gfx / input）。E2E はこれで試合開始・入力有効化を行う。
+- ステージ（2026-10-22 追加）: `sim/map/stages.ts`（ASCII）→ `sim/map/spec.ts` が当たり判定・戦術データ・見た目データを生成。
+  レジストリ `sim/map/registry.ts`（STAGES: マップ・難易度・敵の数）。`World` は `mapId` で切替（既定 'yard'）。
+  見た目は `render/architecture.ts`（テーマ別の装飾）と `config/themes.ts`。
+- ボットのスタック検出: `npx tsx tools/stuck-probe.ts <mapId> <rounds> <defenders>`（目安: 動きたい時間の 2% 未満）。
+- キャラクターは1体1スキンメッシュ（`render/characters.ts`、ボーン=部位）。描画呼び出しを増やす変更は性能に注意（Medium 60fps 目標）。
+- 自己対戦（`tools/selfplay.ts`）実行中は `src/sim`・`src/config` を編集しない（ワーカーがソースを読み直す）。

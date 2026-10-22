@@ -15,6 +15,13 @@ export interface NavPoint {
   z: number;
 }
 
+/**
+ * Static grid data per map key (maps are immutable once built). Each NavGrid
+ * still keeps its own Bvh for runtime queries (destroyed cover differs per
+ * world), only the precomputed arrays are shared — read-only after build.
+ */
+const STATIC_CACHE = new Map<string, { height: Float64Array; component: Int32Array; wallCost: Float64Array }>();
+
 /** highest floor surface (9 levels × 0.4 m) */
 const MAX_FLOOR = 3.65;
 
@@ -60,14 +67,21 @@ export class NavGrid {
     this.cols = Math.round((map.bounds.maxX - map.bounds.minX) / cell);
     this.rows = Math.round((map.bounds.maxZ - map.bounds.minZ) / cell);
     const n = this.cols * this.rows;
-    this.height = new Float64Array(n).fill(NaN);
-    this.component = new Int32Array(n).fill(-1);
-    this.wallCost = new Float64Array(n);
+    // walkability only depends on the static layout: share it per map
+    const cached = STATIC_CACHE.get(map.key);
+    this.height = cached?.height ?? new Float64Array(n).fill(NaN);
+    this.component = cached?.component ?? new Int32Array(n).fill(-1);
+    this.wallCost = cached?.wallCost ?? new Float64Array(n);
     this.g = new Float64Array(n);
     this.parent = new Int32Array(n);
     this.stamp = new Uint32Array(n);
     this.closed = new Uint32Array(n);
-    this.build();
+    if (!cached) {
+      this.build();
+      STATIC_CACHE.set(map.key, { height: this.height, component: this.component, wallCost: this.wallCost });
+      // seeded layouts make a new key every round: keep the cache bounded
+      if (STATIC_CACHE.size > 16) STATIC_CACHE.delete(STATIC_CACHE.keys().next().value!);
+    }
   }
 
   private build(): void {
