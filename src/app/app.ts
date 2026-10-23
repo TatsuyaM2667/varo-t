@@ -10,10 +10,21 @@ import type { EngineHandle } from "../render/engine";
 import { setLang, t } from "../ui/i18n";
 import {
   howtoScreen,
+  lobbyScreen,
+  multiplayerScreen,
   resultsScreen,
   settingsScreen,
   titleScreen,
 } from "../ui/screens";
+import { Lockstep } from "../net/lockstep";
+import {
+  type ErrorCode,
+  type MatchSetup,
+  ROOM_CODE_RE,
+  buildMatch,
+  randomRoomCode,
+} from "../net/protocol";
+import { RelayClient, relayUrl } from "../net/relay-client";
 import { STAGES } from "../sim/map/registry";
 import { AttractMode } from "./attract";
 import {
@@ -23,7 +34,13 @@ import {
   rankFor,
 } from "./highscore";
 import { IdleWatchdog } from "./idle-watchdog";
-import { type MatchResult, MatchMode, type ModeContext } from "./match";
+import {
+  type MatchPlan,
+  type MatchResult,
+  MatchMode,
+  type ModeContext,
+  soloPlan,
+} from "./match";
 import { ReplayViewer } from "./replay-viewer";
 import { type Settings, loadSettings, saveSettings } from "./settings";
 import { type KV, browserKV } from "./storage";
@@ -40,7 +57,15 @@ export const EXHIBIT = {
   crashReloadCount: 3,
 };
 
-type State = "title" | "howto" | "settings" | "match" | "results" | "replay";
+type State =
+  | "title"
+  | "howto"
+  | "settings"
+  | "match"
+  | "results"
+  | "replay"
+  | "mp"
+  | "lobby";
 
 export function detectQuality(gfx: EngineHandle): QualityName {
   let renderer = "";
@@ -70,6 +95,8 @@ export class App {
   private attract: AttractMode | null = null;
   private match: MatchMode | null = null;
   private replay: ReplayViewer | null = null;
+  /** relay connection while in a multiplayer room */
+  private net: RelayClient | null = null;
   private lastResult: MatchResult | null = null;
   private submitted = false;
   private screen: HTMLElement | null = null;
@@ -232,6 +259,7 @@ export class App {
   }
 
   goTitle(): void {
+    this.leaveRoom();
     this.disposeModes();
     if (document.pointerLockElement) document.exitPointerLock();
     this.input.enabled = false;
@@ -242,6 +270,10 @@ export class App {
     this.setScreen(
       titleScreen(this.settings, loadHighScores(this.kv), {
         play: () => this.goHowto(true),
+        multiplayer: () => {
+          this.audio?.ui("click");
+          this.goMultiplayer();
+        },
         howto: () => this.goHowto(false),
         settings: () => this.goSettings(),
         stage: (i) => {
@@ -337,17 +369,23 @@ export class App {
   }
 
   private startMatch(): void {
+    const stage = STAGES[this.settings.stage] ?? STAGES[0];
+    this.launch(
+      soloPlan(stage, this.settings.enemies || stage.enemies, this.features),
+    );
+  }
+
+  private launch(plan: MatchPlan): void {
+    this.disposeModes();
     this.setScreen(null);
     this.retireAttract();
     this.state = "match";
     // Fullscreen first, pointer lock after it settles: requesting both at once
     // makes Chrome reject the lock mid-transition (game stuck on "paused").
     void this.enterFullscreen().then(() => this.input.lockPointer());
-    const stage = STAGES[this.settings.stage] ?? STAGES[0];
     this.match = new MatchMode(
       this.ctx(),
-      stage,
-      this.settings.enemies || stage.enemies,
+      plan,
       (r) => this.onMatchEnd(r),
       () => this.goTitle(),
       () => this.goSettings(true),
@@ -377,9 +415,151 @@ export class App {
     }
   }
 
+  // ------------------------------------------------------- multiplayer
+
+  /** Name entry + create/join. `status` shows progress or the last error. */
+  private goMultiplayer(status = "", isError = false, busy = false): void {
+    this.disposeModes();
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.input.enabled = false;
+    this.state = "mp";
+    this.ensureAttract();
+    this.attract!.setShowcase(false);
+    this.setScreen(
+      multiplayerScreen(
+        this.settings.name,
+        status,
+        busy,
+        {
+          create: (name) => {
+            const rand = () =>
+              crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000;
+            this.joinRoom(name, randomRoomCode(rand));
+          },
+          join: (name, code) =>
+            ROOM_CODE_RE.test(code)
+              ? this.joinRoom(name, code)
+              : this.goMultiplayer(t("errCode"), true),
+          back: () => this.goTitle(),
+        },
+        isError,
+      ),
+    );
+  }
+
+  private joinRoom(name: string, code: string): void {
+    this.settings.name = name.slice(0, 12);
+    saveSettings(this.kv, this.settings);
+    this.leaveRoom();
+    this.goMultiplayer(t("connecting"), false, true);
+    const c = new RelayClient(
+      relayUrl(this.params),
+      code,
+      name || "PLAYER",
+      __BUILD_ID__,
+    );
+    this.net = c;
+    c.onLobby = () => {
+      if (this.state === "lobby") this.renderLobby();
+    };
+    c.onStart = (setup) => this.startOnline(setup);
+    c.onClose = (err) => {
+      if (this.net !== c) return;
+      this.net = null;
+      if (this.state === "match") this.match?.netClosed();
+      else if (this.state === "lobby" || this.state === "mp")
+        this.goMultiplayer(netError(err), true);
+    };
+    c.joined().then(
+      () => {
+        if (this.net === c) this.goLobby();
+      },
+      (err: ErrorCode | null) => {
+        if (this.net !== c) return;
+        this.net = null;
+        this.goMultiplayer(netError(err), true);
+      },
+    );
+  }
+
+  private leaveRoom(): void {
+    const c = this.net;
+    this.net = null;
+    c?.close();
+  }
+
+  private goLobby(): void {
+    if (!this.net) return this.goMultiplayer(t("disconnected"), true);
+    this.disposeModes();
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.input.enabled = false;
+    this.state = "lobby";
+    this.ensureAttract();
+    this.attract!.setShowcase(false);
+    this.renderLobby();
+  }
+
+  private renderLobby(): void {
+    const c = this.net;
+    if (!c?.lobby) return;
+    this.setScreen(
+      lobbyScreen(c.lobby, c.slot, this.settings.lang, {
+        config: (config) => {
+          this.audio?.ui("click");
+          c.send({ t: "config", config });
+        },
+        team: (team) => {
+          this.audio?.ui("click");
+          c.send({ t: "team", team });
+        },
+        start: () => {
+          const f = this.features;
+          c.send({
+            t: "start",
+            features: {
+              destructibles: f.destructibles,
+              seededMap: f.seededMap,
+              utilityAi: f.botUtilityAi,
+            },
+          });
+        },
+        leave: () => {
+          this.leaveRoom();
+          this.goMultiplayer();
+        },
+      }),
+    );
+  }
+
+  /** The host started: every client builds the same world from the setup. */
+  private startOnline(setup: MatchSetup): void {
+    const c = this.net;
+    if (!c) return;
+    const built = buildMatch(setup);
+    const lockstep = new Lockstep({
+      setup,
+      localSlot: c.slot,
+      send: (d) => c.raw(d),
+      onDesync: (tick) => {
+        console.warn(`[net] state hash mismatch at tick ${tick}`);
+        this.match?.hud.notice(t("desync"));
+      },
+    });
+    this.launch({
+      stage: STAGES[setup.config.stage] ?? STAGES[0],
+      options: built.options,
+      localId: lockstep.localAgent,
+      humanIds: built.humanIds,
+      mode: setup.config.mode,
+      net: { lockstep, client: c },
+    });
+  }
+
   private onMatchEnd(r: MatchResult): void {
     this.lastResult = r;
     this.submitted = false;
+    // the room returns to its lobby once the host's match is over
+    if (r.multiplayer && this.net?.isHost) this.net.send({ t: "reset" });
     // let the final banner play for a moment
     setTimeout(() => this.showResults(), 400);
   }
@@ -394,9 +574,10 @@ export class App {
     this.ensureAttract();
     const score = computeScore(r.summary);
     // only offer name entry once per match (the screen is rebuilt after replays)
-    const rank = this.submitted
-      ? -1
-      : rankFor(loadHighScores(this.kv), score.total);
+    const rank =
+      this.submitted || r.multiplayer
+        ? -1
+        : rankFor(loadHighScores(this.kv), score.total);
     this.audio?.ui(r.summary.won ? "win" : "lose");
     this.setScreen(
       resultsScreen(
@@ -406,7 +587,8 @@ export class App {
         r.history,
         this.features.roundReplay,
         {
-          again: () => this.goHowto(true),
+          again: () =>
+            r.multiplayer ? this.goLobby() : this.goHowto(true),
           title: () => this.goTitle(),
           replay: (round) => this.startReplay(round),
           submitName: (name) => {
@@ -424,6 +606,7 @@ export class App {
             }
           },
         },
+        r.multiplayer ? t("backToLobby") : t("playAgain"),
       ),
     );
   }
@@ -434,8 +617,12 @@ export class App {
     this.retireAttract();
     this.state = "replay";
     this.setScreen(null);
-    this.replay = new ReplayViewer(this.ctx(), r.log, round, () =>
-      this.showResults(),
+    this.replay = new ReplayViewer(
+      this.ctx(),
+      r.log,
+      round,
+      () => this.showResults(),
+      r.localId,
     );
   }
 
@@ -446,7 +633,8 @@ export class App {
   }
 
   private onIdle(): void {
-    if (this.state === "title") return;
+    // waiting in a room for friends is not "abandoned"
+    if (this.state === "title" || this.state === "lobby") return;
     console.info("[exhibit] idle → title");
     this.goTitle();
   }
@@ -530,6 +718,13 @@ export class App {
       features: this.features,
     };
   }
+}
+
+function netError(code: ErrorCode | null): string {
+  if (code === "full") return t("errFull");
+  if (code === "inGame") return t("errInGame");
+  if (code === "version") return t("errVersion");
+  return t("errNetwork");
 }
 
 function localDate(): string {

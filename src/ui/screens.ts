@@ -19,6 +19,10 @@ import {
   unboundActions,
 } from "../input/bindings";
 import { t } from "./i18n";
+import { NET } from "../config/net";
+import { type RoomConfig, computeDelay } from "../net/protocol";
+import { MOVEMENT } from "../config/movement";
+import type { LobbyState } from "../net/relay-client";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -43,6 +47,7 @@ function esc(s: string): string {
 
 export interface TitleHandlers {
   play(): void;
+  multiplayer(): void;
   howto(): void;
   settings(): void;
   stage(index: number): void;
@@ -61,6 +66,7 @@ export function titleScreen(
     <p class="tagline">${BRAND.tagline[settings.lang]}</p>
     <div class="menu">
       <button class="primary" data-a="play">${t("play")}</button>
+      <button data-a="mp">${t("multiplayer")}</button>
       <button data-a="howto">${t("howto")}</button>
       <button data-a="settings">${t("settings")}</button>
     </div>
@@ -83,6 +89,7 @@ export function titleScreen(
     const btn = (ev.target as HTMLElement).closest("button");
     if (!btn) return;
     if (btn.dataset.a === "play") h.play();
+    else if (btn.dataset.a === "mp") h.multiplayer();
     else if (btn.dataset.a === "howto") h.howto();
     else if (btn.dataset.a === "settings") h.settings();
     else if (btn.dataset.st) {
@@ -313,6 +320,7 @@ export function resultsScreen(
   history: readonly { winner: 0 | 1; reason: string; duration: number }[],
   replays: boolean,
   h: ResultsHandlers,
+  againLabel = t("playAgain"),
 ): HTMLDivElement {
   const s = el("div", "screen dim results");
   const acc =
@@ -331,7 +339,7 @@ export function resultsScreen(
     </div>
     <div class="breakdown">kills ${score.kills} · HS ${score.headshots} · dmg ${score.damage} · rounds ${score.rounds} · win ${score.match} · time ${score.time} · ×${score.difficultyMul}</div>
     ${replays ? `<div class="rounds">${history.map((r, i) => `<button class="${r.winner === 0 ? "w" : "l"}" data-r="${i}">${t("replay")} R${i + 1} · ${r.winner === 0 ? "W" : "L"} · ${Math.round(r.duration)}s</button>`).join("")}</div>` : ""}
-    <div class="actions"><button data-a="title">${t("backToTitle")}</button><button class="primary" data-a="again">${t("playAgain")}</button></div>
+    <div class="actions"><button data-a="title">${t("backToTitle")}</button><button class="primary" data-a="again">${esc(againLabel)}</button></div>
   </div>`;
   let name = "";
   let named = rank < 0;
@@ -363,6 +371,128 @@ export function resultsScreen(
     if (btn.dataset.r) return h.replay(Number(btn.dataset.r));
     if (btn.dataset.a === "again") h.again();
     else if (btn.dataset.a === "title") h.title();
+  });
+  return s;
+}
+
+export interface MultiplayerHandlers {
+  create(name: string): void;
+  join(name: string, code: string): void;
+  back(): void;
+}
+
+/** Name entry + create / join a room. `status` is an error or progress line. */
+export function multiplayerScreen(
+  name: string,
+  status: string,
+  busy: boolean,
+  h: MultiplayerHandlers,
+  isError = false,
+): HTMLDivElement {
+  const s = el("div", "screen dim");
+  s.innerHTML = `<div class="card mp-card">
+    <h2>${t("multiplayer")}</h2>
+    <label class="mp-field"><span>${t("playerName")}</span><input data-i="name" maxlength="12" autocomplete="off" spellcheck="false" value="${esc(name)}" placeholder="PLAYER"></label>
+    <div class="mp-actions"><button class="primary" data-a="create" ${busy ? "disabled" : ""}>${t("createRoom")}</button></div>
+    <div class="mp-or">${t("roomCodeHint")}</div>
+    <div class="mp-join"><input data-i="code" class="mp-code" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"><button data-a="join" ${busy ? "disabled" : ""}>${t("joinRoom")}</button></div>
+    <div class="mp-status${isError ? " err" : ""}">${esc(status)}</div>
+    <div class="actions"><button data-a="back">${t("backToTitle")}</button></div>
+  </div>`;
+  const nameEl = s.querySelector('[data-i="name"]') as HTMLInputElement;
+  const codeEl = s.querySelector('[data-i="code"]') as HTMLInputElement;
+  codeEl.addEventListener("input", () => {
+    codeEl.value = codeEl.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  });
+  const join = () => h.join(nameEl.value.trim(), codeEl.value.trim());
+  codeEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") join();
+  });
+  s.addEventListener("click", (ev) => {
+    const a = (ev.target as HTMLElement).closest("button")?.dataset.a;
+    if (a === "create") h.create(nameEl.value.trim());
+    else if (a === "join") join();
+    else if (a === "back") h.back();
+  });
+  return s;
+}
+
+export interface LobbyHandlers {
+  config(c: RoomConfig): void;
+  team(team: 0 | 1): void;
+  start(): void;
+  leave(): void;
+}
+
+/** Room lobby: code to share, players per side, host-only match settings. */
+export function lobbyScreen(
+  lobby: LobbyState,
+  mySlot: number,
+  lang: "ja" | "en",
+  h: LobbyHandlers,
+): HTMLDivElement {
+  const s = el("div", "screen dim");
+  const host = lobby.host === mySlot;
+  const c = lobby.config;
+  const me = lobby.players.find((p) => p.slot === mySlot);
+  const versus = c.mode === "versus";
+  const seg = (key: keyof RoomConfig, opts: [string | number, string][]) =>
+    `<div class="seg" data-cfg="${key}">${opts
+      .map(
+        ([v, label]) =>
+          `<button data-v="${v}" class="${String(c[key]) === String(v) ? "on" : ""}" ${host ? "" : "disabled"}>${label}</button>`,
+      )
+      .join("")}</div>`;
+  const player = (p: LobbyState["players"][number]) =>
+    `<div class="mp-player${p.slot === mySlot ? " me" : ""}"><b>${esc(p.name)}</b>${p.slot === lobby.host ? `<small class="tag">${t("hostTag")}</small>` : ""}${p.slot === mySlot ? `<small class="tag you">${t("youTag")}</small>` : ""}<span class="ping">${p.rtt ? `${p.rtt} ms` : "—"}</span></div>`;
+  const column = (team: 0 | 1) => {
+    const list = lobby.players.filter((p) => !versus || p.team === team);
+    return `<div class="mp-team ${team === 0 ? "atk" : "def"}"><h4>${team === 0 ? t("attackersTeam") : t("defendersTeam")}</h4>${
+      !versus && team === 1
+        ? `<div class="mp-bots">BOT × ${c.enemies || STAGES[c.stage].enemies}</div>`
+        : list.map(player).join("") || `<div class="mp-bots">BOT</div>`
+    }</div>`;
+  };
+  s.innerHTML = `<div class="card mp-card lobby">
+    <h2>${t("lobby")}</h2>
+    <div class="mp-room"><span>${t("roomCode")}</span><b>${esc(lobby.code)}</b><small>${t("lobbyShare")}</small></div>
+    <div class="mp-teams">${column(0)}${column(1)}</div>
+    ${versus && me ? `<div class="mp-switch"><button data-a="switch">${t("switchTeam")}</button></div>` : ""}
+    <div class="settings-row"><span>${t("mode")}</span>${seg("mode", [
+      ["coop", t("modeCoop")],
+      ["versus", t("modeVersus")],
+    ])}<span></span></div>
+    <div class="settings-row"><span>${t("stage")}</span>${seg(
+      "stage",
+      STAGES.map((st, i): [number, string] => [i, `${esc(st.title[lang])}`]),
+    )}<span></span></div>
+    ${
+      versus
+        ? `<div class="settings-row"><span>${t("teamSize")}</span>${seg(
+            "teamSize",
+            Array.from({ length: NET.maxTeamSize }, (_, i): [number, string] => [i + 1, String(i + 1)]),
+          )}<small style="color:var(--dim)">${t("teamSizeHint")}</small></div>`
+        : `<div class="settings-row"><span>${t("enemies")}</span>${seg("enemies", [
+            [0, t("stageDefault")],
+            ...[3, 4, 5, 6, 7, 8].map((n): [number, string] => [n, String(n)]),
+          ])}<span></span></div>`
+    }
+    <div class="mp-delay">${t("inputDelay")}: ${Math.round((computeDelay(lobby.players.map((p) => p.rtt)) * 1000) / MOVEMENT.tickRate)} ms</div>
+    <div class="mp-status">${lobby.state === "game" ? t("inGameNow") : host ? "" : t("waitHost")}</div>
+    <div class="actions"><button data-a="leave">${t("leaveRoom")}</button>${host ? `<button class="primary" data-a="start" ${lobby.state === "game" ? "disabled" : ""}>${t("startMatch")}</button>` : ""}</div>
+  </div>`;
+  s.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement).closest("button");
+    if (!btn || btn.disabled) return;
+    const a = btn.dataset.a;
+    if (a === "leave") return h.leave();
+    if (a === "start") return h.start();
+    if (a === "switch" && me) return h.team(me.team === 0 ? 1 : 0);
+    const key = (btn.parentElement as HTMLElement | null)?.dataset.cfg as keyof RoomConfig | undefined;
+    if (key && host) {
+      const v = btn.dataset.v!;
+      h.config({ ...c, [key]: key === "mode" ? v : Number(v) } as RoomConfig);
+    }
   });
   return s;
 }

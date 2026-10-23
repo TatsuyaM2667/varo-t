@@ -223,6 +223,24 @@ export class World {
     this.events.push({ type: 'phase', phase: 'prep', round: index });
   }
 
+  /**
+   * Hand a human's agent to a bot (player left a multiplayer match). Takes
+   * effect from the next step; deterministic as long as every client calls
+   * it before the same tick. The brain's seed depends only on (round, agent).
+   */
+  convertToBot(id: number): void {
+    const a = this.agents[id];
+    if (!a || a.isBot) return;
+    const spec = this.roster[id];
+    const difficulty = (spec.difficulty ?? DEFAULT_DIFFICULTY) as Difficulty;
+    spec.isBot = true;
+    spec.difficulty = difficulty;
+    a.isBot = true;
+    a.difficulty = difficulty;
+    if (this.round.index >= 0)
+      this.brains[id] = createBrain(a, difficulty, this.features.utilityAi, new Rng(this.roundSeed(this.round.index) ^ Math.imul(id + 7, 0x2545f491) ^ 0xb07), spec.profile);
+  }
+
   /** Begin a fresh match (round 0). */
   startMatch(): void {
     this.match.score = [0, 0];

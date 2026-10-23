@@ -23,6 +23,10 @@ import type { SimEvent } from '../sim/events';
 import { Btn } from '../sim/input-frame';
 import { zoneAt } from '../sim/map/map-def';
 import { InputLog, RoundReplay } from '../sim/replay/input-log';
+import { NET } from '../config/net';
+import { type Lockstep, runLockstepTicks } from '../net/lockstep';
+import type { NetMode } from '../net/protocol';
+import type { RelayClient } from '../net/relay-client';
 import { type AgentSpec, World, type WorldOptions } from '../sim/world';
 import { Hud } from '../ui/hud';
 import { t } from '../ui/i18n';
@@ -45,13 +49,45 @@ export interface ModeContext {
 export interface MatchResult {
   summary: MatchSummary;
   log: InputLog;
+  /** per round; winner 0 = the local player's side won */
   history: { winner: 0 | 1; reason: string; duration: number }[];
   playerName: string;
+  localId: number;
+  multiplayer: boolean;
+}
+
+/** Everything a match needs to start: the world, who we are, and (online) the lockstep link. */
+export interface MatchPlan {
+  stage: StageDef;
+  options: WorldOptions;
+  localId: number;
+  humanIds: number[];
+  mode: 'solo' | NetMode;
+  net: { lockstep: Lockstep; client: RelayClient } | null;
+}
+
+/** Single player: one human attacker vs `enemies` bot defenders. */
+export function soloPlan(stage: StageDef, enemies: number, f: Features): MatchPlan {
+  const roster: AgentSpec[] = [{ team: 0, isBot: false, name: 'YOU', hpBonus: RULES.playerHpBonus }];
+  for (let i = 0; i < enemies; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i % BOT_NAMES.length], difficulty: stage.difficulty });
+  return {
+    stage,
+    options: {
+      seed: (Date.now() ^ (performance.now() * 1000)) >>> 0,
+      mapId: stage.map,
+      roster,
+      features: { destructibles: f.destructibles, seededMap: f.seededMap, utilityAi: f.botUtilityAi },
+    },
+    localId: 0,
+    humanIds: [0],
+    mode: 'solo',
+    net: null,
+  };
 }
 
 const TICK = MOVEMENT.tickRate;
 
-/** One human (attacker) vs bots (defenders). */
+/** A match from one human's point of view: solo vs bots, or online in lockstep. */
 export class MatchMode {
   readonly world: World;
   readonly renderer: GameRenderer;
@@ -76,33 +112,34 @@ export class MatchMode {
   private readonly spectate = new SmoothCam();
   private timeLeftOnWins = 0;
   private finished = false;
+  private readonly stage: StageDef;
+  /** our agent id and side */
+  readonly localId: number;
+  readonly team: 0 | 1;
+  private readonly net: MatchPlan['net'];
+  private stallTime = 0;
 
   constructor(
     private readonly ctx: ModeContext,
-    private readonly stage: StageDef,
-    enemies: number,
+    readonly plan: MatchPlan,
     private readonly onFinish: (r: MatchResult) => void,
     private readonly onQuit: () => void,
     private readonly onSettings: () => void = () => {},
   ) {
     const f = ctx.features;
-    const roster: AgentSpec[] = [{ team: 0, isBot: false, name: 'YOU', hpBonus: RULES.playerHpBonus }];
-    const difficulty = stage.difficulty;
-    for (let i = 0; i < enemies; i++) roster.push({ team: 1, isBot: true, name: BOT_NAMES[i % BOT_NAMES.length], difficulty });
-    this.options = {
-      seed: (Date.now() ^ (performance.now() * 1000)) >>> 0,
-      mapId: stage.map,
-      roster,
-      features: { destructibles: f.destructibles, seededMap: f.seededMap, utilityAi: f.botUtilityAi },
-    };
+    this.stage = plan.stage;
+    this.options = plan.options;
+    this.localId = plan.localId;
+    this.net = plan.net;
     this.world = new World(this.options);
     this.world.startMatch();
-    this.log = new InputLog(this.options, [0]);
+    this.team = this.world.agents[this.localId].team;
+    this.log = new InputLog(this.options, plan.humanIds);
 
-    this.renderer = new GameRenderer(ctx.gfx.engine, this.world.map, this.world.agents, ctx.quality, f, 0);
+    this.renderer = new GameRenderer(ctx.gfx.engine, this.world.map, this.world.agents, ctx.quality, f, this.team);
     this.view = new WorldView(this.renderer, f.proceduralAudio ? ctx.audio : null, this.world);
-    this.view.localId = 0;
-    this.viewmodel = new Viewmodel(this.renderer.scene, this.renderer.camera, 0);
+    this.view.localId = this.localId;
+    this.viewmodel = new Viewmodel(this.renderer.scene, this.renderer.camera, this.team);
     this.view.viewmodel = this.viewmodel;
     this.view.onEvent = (e, w) => this.onEvent(e, w);
     if (ctx.audio) ctx.audio.spatialReverb = f.spatialReverb;
@@ -128,14 +165,43 @@ export class MatchMode {
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
-    ctx.input.setLook(this.world.agents[0].yaw, 0);
+    ctx.input.setLook(this.world.agents[this.localId].yaw, 0);
     this.lastYaw = ctx.input.lookYaw;
     this.applyMood(0);
-    this.hud.showBanner(`${t('round')} 1`, t('objective'), PALETTE.teams.attackers, 3.5);
+    this.hud.showBanner(`${t('round')} 1`, this.objective(), this.teamColor, 3.5);
+    if (this.net) this.wireNet();
+  }
+
+  private get teamColor(): string {
+    return this.team === 0 ? PALETTE.teams.attackers : PALETTE.teams.defenders;
+  }
+
+  private objective(): string {
+    return this.team === 0 ? t('objective') : t('objectiveDefend');
+  }
+
+  /** Route relay traffic into the lockstep and surface joins/leaves/desyncs on the HUD. */
+  private wireNet(): void {
+    const { lockstep, client } = this.net!;
+    client.onInputs = (p) => lockstep.receiveInputs(p.slot, p.firstTick, p.frames);
+    client.onHash = (slot, tick, h) => lockstep.receiveHash(slot, tick, h);
+    client.onLeft = (slot, tick) => {
+      lockstep.receiveLeft(slot, tick);
+      const name = this.plan.options.roster[lockstep.agentOfSlot(slot)]?.name ?? '?';
+      this.hud.notice(`${name} ${t('playerLeftBot')}`);
+    };
+  }
+
+  /** Our relay connection dropped: the match cannot continue. */
+  netClosed(): void {
+    if (this.finished) return;
+    this.hud.showBanner(t('disconnected'), '', '#ff5c6c', 3);
+    this.finished = true;
+    setTimeout(() => this.onQuit(), 2500);
   }
 
   private renderPause(): void {
-    this.pauseEl.innerHTML = `<div class="card" style="min-width:360px;text-align:center"><h2>${t('paused')}</h2><div style="text-align:left;margin-bottom:12px">${controlsGridHtml(this.ctx.input.bindings)}</div>
+    this.pauseEl.innerHTML = `<div class="card" style="min-width:360px;text-align:center"><h2>${this.net ? t('onlineOverlay') : t('paused')}</h2><div style="text-align:left;margin-bottom:12px">${controlsGridHtml(this.ctx.input.bindings)}</div>
       <div class="menu" style="margin-top:10px"><button class="primary" data-a="resume">${t('clickToResume')}</button><button data-a="settings">${t('settings')}</button><button data-a="quit">${t('backToTitle')}</button></div></div>`;
   }
 
@@ -166,21 +232,23 @@ export class MatchMode {
     this.renderer.setMood(this.ctx.features.timeOfDay ? moods[round % moods.length] : moods[0]);
   }
 
+  /** Online the world never pauses: the overlay only stops our own input. */
   setPaused(p: boolean): void {
     this.paused = p && !this.finished;
     this.pauseEl.hidden = !this.paused;
   }
 
   private onEvent(e: SimEvent, w: World): void {
-    const me = w.agents[0];
+    const id = this.localId;
+    const me = w.agents[id];
     const au = this.view.audio;
     switch (e.type) {
       case 'damage':
-        if (e.attacker === 0) {
+        if (e.attacker === id) {
           this.hud.hitmarker(e.zone === 'head', e.killed);
           au?.hitmarker(e.zone === 'head', e.killed);
         }
-        if (e.victim === 0) {
+        if (e.victim === id) {
           const att = w.agents[e.attacker];
           const ang = Math.atan2(att.x - me.x, att.z - me.z) - me.yaw * RAD_PER_UNIT;
           this.hud.damageFrom(ang);
@@ -191,23 +259,24 @@ export class MatchMode {
       case 'kill': {
         const k = w.agents[e.killer];
         const v = w.agents[e.victim];
-        if (w === this.world) this.hud.kill(k.name, v.name, k.team, v.team, e.weapon, e.headshot, e.killer === 0 || e.victim === 0);
+        if (w === this.world) this.hud.kill(k.name, v.name, k.team, v.team, e.weapon, e.headshot, e.killer === id || e.victim === id);
         if (w !== this.world) break;
-        if (e.victim === 0 && this.ctx.features.killcam) {
+        if (e.victim === id && this.ctx.features.killcam) {
           this.pendingKillcam = { at: this.time + 1.1, deathTick: w.round.tick, round: w.round.index, killer: e.killer };
         }
-        if (e.killer === 0 && w.aliveCount(1) === 0 && this.ctx.features.killSlowmo) this.slowmo = 0.9;
+        // slow motion would desync a lockstep match: solo only
+        if (e.killer === id && w.aliveCount(this.team === 0 ? 1 : 0) === 0 && this.ctx.features.killSlowmo && !this.net) this.slowmo = 0.9;
         break;
       }
       case 'roundEnd': {
         if (w !== this.world) break;
-        const won = e.winner === 0;
+        const won = e.winner === this.team;
         if (won) {
           const h = w.match.history[w.match.history.length - 1];
           this.timeLeftOnWins += Math.max(0, w.roundTime - (h.duration - RULES.prepTime));
         }
         const reason = e.reason === 'elimination' ? t('elimination') : e.reason === 'capture' ? t('captureReason') : t('timeReason');
-        this.hud.showBanner(won ? t('roundWon') : t('roundLost'), reason, won ? PALETTE.teams.attackers : '#ff5c6c', 3);
+        this.hud.showBanner(won ? t('roundWon') : t('roundLost'), reason, won ? this.teamColor : '#ff5c6c', 3);
         au?.ui(won ? 'win' : 'lose');
         break;
       }
@@ -215,27 +284,27 @@ export class MatchMode {
         if (w !== this.world) break;
         if (e.phase === 'prep') {
           this.applyMood(e.round);
-          this.hud.showBanner(`${t('round')} ${e.round + 1}`, t('objective'), PALETTE.teams.attackers, 3);
-          this.ctx.input.setLook(w.agents[0].yaw, 0);
+          this.hud.showBanner(`${t('round')} ${e.round + 1}`, this.objective(), this.teamColor, 3);
+          this.ctx.input.setLook(w.agents[id].yaw, 0);
           this.lastYaw = this.ctx.input.lookYaw;
           this.stopKillcam();
         } else if (e.phase === 'live') au?.ui('roundStart');
         break;
       case 'fireBlocked':
-        if (e.agent === 0 && w === this.world)
+        if (e.agent === id && w === this.world)
           this.hud.notice(e.reason === 'prep' ? t('blockedPrep') : e.reason === 'reload' ? t('blockedReload') : t('blockedEquip'));
         break;
       case 'dry':
-        if (e.agent === 0 && w === this.world) this.hud.notice(t('emptyMag'));
+        if (e.agent === id && w === this.world) this.hud.notice(t('emptyMag'));
         break;
       case 'captureStart':
         au?.ui('capture');
         break;
       case 'dash':
-        if (e.agent === 0) this.dashKick = 1;
+        if (e.agent === id) this.dashKick = 1;
         break;
       case 'land':
-        if (e.agent === 0) this.landDip = Math.min(0.12, e.speed * CAMERA_FEEL.landDip);
+        if (e.agent === id) this.landDip = Math.min(0.12, e.speed * CAMERA_FEEL.landDip);
         break;
       default:
         break;
@@ -263,7 +332,7 @@ export class MatchMode {
     this.killcam.tag.remove();
     this.killcam = null;
     this.view.attach(this.world);
-    this.view.localId = 0;
+    this.view.localId = this.localId;
   }
 
   frame(realDt: number): void {
@@ -272,7 +341,7 @@ export class MatchMode {
     this.adaptive.sample(realDt * 1000, this.time);
     const input = this.ctx.input;
     const w = this.world;
-    const me = w.agents[0];
+    const me = w.agents[this.localId];
 
     // scoped sensitivity: slower look while zoomed
     const wdef = def(me.weapon);
@@ -282,7 +351,8 @@ export class MatchMode {
     // --- simulation ---
     const scale = this.slowmo > 0 ? 0.3 : 1;
     this.slowmo = Math.max(0, this.slowmo - dt);
-    if (!this.paused) {
+    if (this.net) this.stepOnline(dt);
+    else if (!this.paused) {
       const steps = this.step.advance(dt * scale);
       for (let i = 0; i < steps; i++) {
         const f = input.sample();
@@ -314,7 +384,7 @@ export class MatchMode {
       cam = shoulderCam(eye, this.view.world.bvh, 2.2, 0.6, 0.3);
       hide = -1;
     } else if (me.alive) {
-      const eye = this.view.eye(0, alpha);
+      const eye = this.view.eye(this.localId, alpha);
       const lookYaw = input.lookYaw * RAD_PER_UNIT;
       const lookPitch = input.lookPitch * RAD_PER_UNIT;
       const proc = this.ctx.features.proceduralAnimation;
@@ -368,9 +438,36 @@ export class MatchMode {
     if (w.round.phase === 'matchOver' && !this.finished) this.finish();
   }
 
+  /**
+   * Lockstep: tick t runs only when every human's input for t is here. Our
+   * input made now is for t + delay. A client that fell behind (tab hidden,
+   * slow frame) runs a few extra ticks per frame until it is level again.
+   */
+  private stepOnline(dt: number): void {
+    const { lockstep } = this.net!;
+    const w = this.world;
+    let steps = this.step.advance(dt);
+    const lag = lockstep.lagBehind(w.tick);
+    if (lag >= NET.catchUpTicks) steps += Math.min(NET.maxCatchUpPerFrame, lag - NET.catchUpTicks + 1);
+    const ran = runLockstepTicks(lockstep, w, steps, {
+      sample: () => this.ctx.input.sample(),
+      record: (round, frames) => this.log.record(round, frames),
+      converted: (agent, round, tick) => this.log.recordConversion(agent, round, tick),
+      afterTick: () => {
+        if (!this.killcam) this.view.afterTick();
+      },
+    });
+    const stalled = ran < steps;
+    if (stalled) {
+      this.step.reset();
+      this.stallTime += dt;
+      if (this.stallTime > 0.6) this.hud.notice(t('waitingPlayers'));
+    } else this.stallTime = 0;
+  }
+
   private updateHud(dt: number, cam: { x: number; y: number; z: number; yaw: number }): void {
     const w = this.world;
-    const me = w.agents[0];
+    const me = w.agents[this.localId];
     const wd = def(me.weapon);
     const ammo = me.weapon.ammo[me.weapon.current];
     const spread = currentSpreadDeg(me.weapon, {
@@ -424,8 +521,8 @@ export class MatchMode {
     if (this.ctx.features.minimap) {
       const eyeY = me.y + me.height - 0.15;
       const agents = w.agents
-        .filter((a) => a.alive && (a.id === 0 || a.team === 0 || w.canSee(me.x, eyeY, me.z, a.x, a.y + 1.4, a.z)))
-        .map((a) => ({ x: a.x, z: a.z, yaw: a.yaw * RAD_PER_UNIT, team: a.team, self: a.id === 0 }));
+        .filter((a) => a.alive && (a.team === this.team || w.canSee(me.x, eyeY, me.z, a.x, a.y + 1.4, a.z)))
+        .map((a) => ({ x: a.x, z: a.z, yaw: a.yaw * RAD_PER_UNIT, team: a.team, self: a.id === this.localId }));
       this.hud.drawMinimap(
         agents,
         w.smokes.map((s) => ({ x: s.x, z: s.z, r: 4.4 * smokeStrength(s) })),
@@ -436,18 +533,25 @@ export class MatchMode {
   private finish(): void {
     this.finished = true;
     const w = this.world;
-    const me = w.agents[0];
+    const me = w.agents[this.localId];
     const summary: MatchSummary = {
       stats: { ...me.stats },
-      roundsWon: w.match.score[0],
-      roundsLost: w.match.score[1],
-      won: w.match.winner === 0,
+      roundsWon: w.match.score[this.team],
+      roundsLost: w.match.score[1 - this.team],
+      won: w.match.winner === this.team,
       timeLeftOnWins: this.timeLeftOnWins,
       difficulty: this.stage.difficulty,
-      enemies: this.options.roster.length - 1,
+      enemies: this.options.roster.filter((a) => a.team !== this.team).length,
       stage: this.stage.map,
     };
-    this.onFinish({ summary, log: this.log, history: w.match.history.map((h) => ({ ...h })), playerName: me.name });
+    this.onFinish({
+      summary,
+      log: this.log,
+      history: w.match.history.map((h) => ({ ...h, winner: h.winner === this.team ? 0 : 1 })),
+      playerName: me.name,
+      localId: this.localId,
+      multiplayer: !!this.net,
+    });
   }
 
   dispose(): void {

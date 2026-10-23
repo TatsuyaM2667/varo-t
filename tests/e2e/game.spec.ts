@@ -144,3 +144,20 @@ test('stage selection and enemy count set up the match', async ({ page }) => {
   await page.waitForFunction(() => (window as unknown as Hooks).__game.app.debugState().match?.world.round.phase === 'live', null, { timeout: 30_000 });
   expect(errors).toEqual([]);
 });
+
+test('multiplayer screen validates codes and reports an unreachable relay', async ({ page }) => {
+  // point the client at a port nothing listens on: the join must fail cleanly back to the form
+  const errors = await boot(page, 'engine=webgl&q=low&relay=ws://127.0.0.1:9');
+  await page.click('button[data-a="mp"]');
+  await page.fill('.mp-code', 'ab');
+  await page.click('button[data-a="join"]');
+  await expect(page.locator('.mp-status.err')).toBeVisible();
+  await page.fill('.mp-code', 'abcd');
+  await expect(page.locator('.mp-code')).toHaveValue('ABCD');
+  await page.click('button[data-a="join"]');
+  await expect(page.locator('.mp-status.err')).toBeVisible({ timeout: 15_000 });
+  expect(await page.evaluate(() => (window as unknown as Hooks).__game.app.debugState().state)).toBe('mp');
+  await page.click('button[data-a="back"]');
+  await page.waitForFunction(() => (window as unknown as Hooks).__game.app.debugState().state === 'title');
+  expect(errors).toEqual([]);
+});

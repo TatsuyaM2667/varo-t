@@ -50,6 +50,16 @@ input (DOM) ──► InputFrame (per tick, quantised) ──► World.step()  �
 - Post: FXAA, bloom, ACES tone mapping, sharpen, SSAO2 (WebGL2 only: under WebGPU this Babylon build fails to bind its noise sampler), volumetric sun shafts (Ultra), damage chromatic aberration.
 - Lighting moods per round (time of day), PBR + IBL from a reflection probe of the procedural sky.
 
+## Multiplayer (`src/net`, `server/`)
+- **Delay-based lockstep.** Every client runs the same deterministic World; only humans' InputFrames travel. A client simulates tick t once it holds every active human's input for t; input sampled while simulating t is scheduled for t + delay and sent immediately (batched `sendEveryTicks` per packet). The camera look is applied locally at once, so only movement/firing feel the delay.
+- **Delay** = ceil(worst conservative RTT / tick) + batching, clamped to `NET.minDelayTicks…maxDelayTicks`, fixed per match by the relay at start (clients report smoothed RTT + 2× deviation).
+- **Relay**: a Cloudflare Worker with one Durable Object per 4-letter room code (`locationHint: 'apac'`). `RoomCore` (`src/net/room.ts`, pure, unit-tested) keeps the lobby and forwards input packets in arrival order, stamping the sender's slot. It never simulates.
+- **Leaving**: the relay knows the last tick it relayed for a leaver and broadcasts `left(slot, tick)`; every client has all inputs before that tick and none after, so all convert the agent to a bot (`World.convertToBot`) right before the same tick. The InputLog records conversions so killcams and replays stay exact.
+- **Stalls / catch-up**: a client missing input stops (flushing its partial batch so two stalled clients cannot wait on each other); a client that fell behind (inputs buffered beyond tick + delay) runs extra ticks per frame.
+- **Desync detection**: state hashes every `hashEveryTicks` are exchanged and compared (HUD notice on mismatch). Rooms admit only the same build (`__BUILD_ID__`).
+- **Sim features** (destructibles, seeded maps, utility AI) come from the host in the start message, not from each client's quality preset.
+- Tested headlessly by `tests/unit/net.test.ts`: 3 clients with jittery frame rates and 15–70 ms latency stay bit-identical; a leaver becomes a bot at the same tick everywhere and the round replays exactly.
+
 ## Quality
 - Presets in `config/quality.ts` (each also enables Tier 1/2 visual flags). Auto-detected (integrated → Medium, discrete → High, software → Low).
 - `render/quality/adaptive.ts`: p95 frame time per 2 s window; steps down **resolution → effects → post**, steps back up after sustained headroom, never retries a failed upgrade for 60 s.

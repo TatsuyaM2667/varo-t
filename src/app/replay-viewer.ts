@@ -28,6 +28,8 @@ export class ReplayViewer {
     private readonly log: InputLog,
     private readonly round: number,
     private readonly onExit: () => void,
+    /** agent to follow (the local player) */
+    private readonly focusId = 0,
   ) {
     this.replay = new RoundReplay(log, round);
     this.total = log.ticks(round);
@@ -77,8 +79,8 @@ export class ReplayViewer {
       }
     }
     const w = this.replay.world;
-    const me = w.agents[0];
-    const focus = me.alive ? 0 : me.lastAttacker >= 0 ? me.lastAttacker : 0;
+    const me = w.agents[this.focusId];
+    const focus = me.alive ? this.focusId : me.lastAttacker >= 0 ? me.lastAttacker : this.focusId;
     const alpha = this.paused ? 1 : Math.min(1, this.acc * TICK);
     const target = shoulderCam(this.view.eye(focus, alpha), w.bvh, 2.6, 0.6, 0.4);
     this.view.render(alpha, this.cam.follow(target, dt, 8), -1, dt);

@@ -981,3 +981,151 @@ button {
 .stage small { grid-column: 1 / -1; font-size: 12px; color: var(--dim); }
 .stage:hover { background: rgba(255, 255, 255, 0.08); }
 .stage.on { border-color: var(--atk); border-left-color: var(--atk); background: rgba(255, 182, 72, 0.12); }
+
+/* ---------------------------------------------------------- multiplayer */
+.mp-card {
+    min-width: 560px;
+}
+.mp-field {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    align-items: center;
+    gap: 14px;
+    margin: 6px 0 18px;
+}
+.mp-card input {
+    font: inherit;
+    color: var(--fg);
+    background: rgba(244, 241, 234, 0.06);
+    border: 1px solid var(--line);
+    padding: 9px 12px;
+    outline: none;
+}
+.mp-card input:focus {
+    border-color: var(--def);
+}
+.mp-actions button,
+.mp-join button {
+    padding: 10px 22px;
+    letter-spacing: 0.15em;
+    border: 1px solid var(--line);
+    background: rgba(244, 241, 234, 0.08);
+}
+.mp-actions button.primary {
+    width: 100%;
+    background: var(--atk);
+    color: #1a1104;
+    border-color: var(--atk);
+    font-weight: 700;
+}
+.mp-or {
+    margin: 22px 0 8px;
+    color: var(--dim);
+    font-size: 13px;
+}
+.mp-join {
+    display: flex;
+    gap: 10px;
+}
+.mp-code {
+    flex: 1;
+    font-size: 24px !important;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    text-align: center;
+}
+.mp-status {
+    min-height: 22px;
+    margin-top: 14px;
+    color: var(--dim);
+    font-size: 14px;
+}
+.mp-status.err {
+    color: var(--bad);
+}
+.mp-room {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.mp-room b {
+    font-size: 40px;
+    letter-spacing: 0.35em;
+    color: var(--atk);
+}
+.mp-room small {
+    color: var(--dim);
+}
+.mp-teams {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+.mp-team {
+    border: 1px solid var(--line);
+    padding: 10px 14px;
+    min-height: 96px;
+}
+.mp-team h4 {
+    margin: 0 0 8px;
+    letter-spacing: 0.2em;
+    font-size: 13px;
+}
+.mp-team.atk h4 {
+    color: var(--atk);
+}
+.mp-team.def h4 {
+    color: var(--def);
+}
+.mp-player {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+.mp-player.me b {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+.mp-player .tag {
+    font-size: 11px;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    color: var(--dim);
+}
+.mp-player .tag.you {
+    color: var(--def);
+    border-color: var(--def);
+}
+.mp-player .ping {
+    margin-left: auto;
+    color: var(--dim);
+    font-size: 12px;
+}
+.mp-bots {
+    color: var(--dim);
+    font-size: 14px;
+    padding: 4px 0;
+}
+.mp-switch {
+    margin-top: 10px;
+    text-align: right;
+}
+.mp-switch button {
+    padding: 6px 14px;
+    border: 1px solid var(--line);
+    background: transparent;
+    font-size: 13px;
+}
+.lobby .seg button:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+.mp-delay {
+    margin-top: 8px;
+    color: var(--dim);
+    font-size: 13px;
+    text-align: right;
+}

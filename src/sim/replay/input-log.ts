@@ -5,10 +5,13 @@ import { World, type WorldOptions } from '../world';
  * Per-round log of human inputs. Bots are deterministic functions of the
  * world, so (world options, round index, human inputs) fully define a round.
  * Each tick stores one packed frame per human: [buttons | pitch<<16, yaw].
+ * A human who left a multiplayer match becomes a bot; `conversions` records
+ * when, so re-simulation converts them at the same tick.
  */
 export class InputLog {
   /** rounds[r][tick] = packed frames for the humans, in roster order */
   private readonly rounds = new Map<number, number[]>();
+  readonly conversions: { agent: number; round: number; tick: number }[] = [];
 
   constructor(
     readonly options: WorldOptions,
@@ -22,10 +25,7 @@ export class InputLog {
       arr = [];
       this.rounds.set(round, arr);
     }
-    for (const id of this.humanIds) {
-      const f = inputs[id];
-      arr.push(f ? packA(f) : 0, f ? f.yaw & 0xffff : 0);
-    }
+    for (const id of this.humanIds) arr.push(...packInput(inputs[id]));
   }
 
   ticks(round: number): number {
@@ -51,7 +51,7 @@ export class InputLog {
         out[this.humanIds[h]] = undefined;
         continue;
       }
-      out[this.humanIds[h]] = unpack(arr[o], arr[o + 1]);
+      out[this.humanIds[h]] = unpackInput(arr[o], arr[o + 1]);
     }
     return out;
   }
@@ -64,14 +64,24 @@ export class InputLog {
   import(round: number, data: Uint32Array): void {
     this.rounds.set(round, Array.from(data));
   }
+
+  recordConversion(agent: number, round: number, tick: number): void {
+    this.conversions.push({ agent, round, tick });
+  }
 }
 
-function packA(f: InputFrame): number {
-  return ((f.buttons & 0xffff) | (((f.pitch + 32768) & 0xffff) << 16)) >>> 0;
+/** yaw word marking "no input this tick" (the sim then holds the agent's view) */
+const NO_INPUT = 0xffffffff;
+
+/** [buttons | (pitch + 32768) << 16, yaw] as two u32 words. */
+export function packInput(f: InputFrame | undefined): [number, number] {
+  if (!f) return [0, NO_INPUT];
+  return [((f.buttons & 0xffff) | (((f.pitch + 32768) & 0xffff) << 16)) >>> 0, f.yaw & 0xffff];
 }
 
-function unpack(a: number, yaw: number): InputFrame {
-  return { buttons: a & 0xffff, pitch: ((a >>> 16) & 0xffff) - 32768, yaw };
+export function unpackInput(a: number, yaw: number): InputFrame | undefined {
+  if (yaw === NO_INPUT) return undefined;
+  return { buttons: a & 0xffff, pitch: ((a >>> 16) & 0xffff) - 32768, yaw: yaw & 0xffff };
 }
 
 /**
@@ -87,6 +97,7 @@ export class RoundReplay {
     readonly round: number,
   ) {
     this.world = new World(log.options);
+    for (const c of log.conversions) if (c.round < round) this.world.convertToBot(c.agent);
     this.world.startRound(round);
   }
 
@@ -99,6 +110,7 @@ export class RoundReplay {
     if (this.world.round.index !== this.round) return false;
     const t = this.world.round.tick;
     if (t >= this.log.ticks(this.round)) return false;
+    for (const c of this.log.conversions) if (c.round === this.round && c.tick === t) this.world.convertToBot(c.agent);
     this.world.step(this.log.frameAt(this.round, t, this.scratch));
     return this.world.round.index === this.round;
   }

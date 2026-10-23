@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node tools/check-pages-limits.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p server",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
@@ -16,7 +16,9 @@
     "validate:map": "tsx tools/validate-map.ts",
     "pack:offline": "node tools/pack-offline.mjs",
     "perf": "node tools/perf.mjs",
-    "deploy": "npm run build && npx wrangler pages deploy dist --project-name halcyon-line"
+    "deploy": "npm run build && npx wrangler pages deploy dist --project-name halcyon-line",
+    "relay:dev": "npx wrangler dev -c server/wrangler.toml",
+    "relay:deploy": "npx wrangler deploy -c server/wrangler.toml"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

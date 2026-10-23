@@ -22,6 +22,7 @@
 | 射線チェック | `npm run validate:map` |
 | 性能計測 | `npm run perf`（実機GPUは `-- --headed`） |
 | デプロイ | `npm run deploy`（wrangler） |
+| 中継サーバ | `npm run relay:deploy` / ローカル `npm run relay:dev` |
 
 ## アーキテクチャ規約
 - `src/sim/` は **Babylon.js・DOM・`window` に依存しない純TS**。import してよいのは `src/sim/` と `src/config/` のみ。
@@ -59,4 +60,8 @@
   見た目は `render/architecture.ts`（テーマ別の装飾）と `config/themes.ts`。
 - ボットのスタック検出: `npx tsx tools/stuck-probe.ts <mapId> <rounds> <defenders>`（目安: 動きたい時間の 2% 未満）。
 - キャラクターは1体1スキンメッシュ（`render/characters.ts`、ボーン=部位）。描画呼び出しを増やす変更は性能に注意（Medium 60fps 目標）。
+- マルチプレイ（2026-10-23 追加）: 遅延ロックステップ。`src/net/`（protocol / lockstep / room / relay-client）＋ `server/relay.ts`（Worker + Durable Object、
+  Pages とは別に `npm run relay:deploy`）。中継 URL・遅延・送信間隔は `config/net.ts`。
+  **sim を変えたら全クライアントが同じビルドである必要がある**（ルームは `__BUILD_ID__` 一致のみ入室可）。
+  試合中に時間の進み方を変える処理（スロー・一時停止）はオンラインでは無効にすること。`MatchMode` は `localId`/`team` を使い、agent 0 決め打ち禁止。
 - 自己対戦（`tools/selfplay.ts`）実行中は `src/sim`・`src/config` を編集しない（ワーカーがソースを読み直す）。
