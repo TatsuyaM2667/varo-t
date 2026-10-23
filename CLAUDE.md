@@ -60,8 +60,10 @@
   見た目は `render/architecture.ts`（テーマ別の装飾）と `config/themes.ts`。
 - ボットのスタック検出: `npx tsx tools/stuck-probe.ts <mapId> <rounds> <defenders>`（目安: 動きたい時間の 2% 未満）。
 - キャラクターは1体1スキンメッシュ（`render/characters.ts`、ボーン=部位）。描画呼び出しを増やす変更は性能に注意（Medium 60fps 目標）。
-- マルチプレイ（2026-10-23 追加）: 遅延ロックステップ。`src/net/`（protocol / lockstep / room / relay-client）＋ `server/relay.ts`（Worker + Durable Object、
-  Pages とは別に `npm run relay:deploy`）。中継 URL・遅延・送信間隔は `config/net.ts`。
+- マルチプレイ（2026-10-23 追加）: 遅延ロックステップ。入力は WebRTC P2P（`src/net/peers.ts`、公開 STUN のみ・TURN なし）、
+  直接つながらない組だけ中継。`src/net/`（protocol / lockstep / room / relay-client / peers）＋ `server/relay.ts`（Worker + Durable Objects、
+  Pages とは別に `npm run relay:deploy`）。管理ページ `/admin`（`server/admin-page.ts`, `stats-core.ts`、パスワードは secret `ADMIN_TOKEN`）。
+  **完全無料が絶対条件**: Workers/DO は Free プランのみ、有料サービス（TURN 等）を足さない。中継 URL・遅延・送信間隔は `config/net.ts`。
   **sim を変えたら全クライアントが同じビルドである必要がある**（ルームは `__BUILD_ID__` 一致のみ入室可）。
   試合中に時間の進み方を変える処理（スロー・一時停止）はオンラインでは無効にすること。`MatchMode` は `localId`/`team` を使い、agent 0 決め打ち禁止。
 - 自己対戦（`tools/selfplay.ts`）実行中は `src/sim`・`src/config` を編集しない（ワーカーがソースを読み直す）。

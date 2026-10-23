@@ -13,6 +13,7 @@ import {
   type InputPacket,
   decodeInputs,
 } from './protocol';
+import { PeerMesh } from './peers';
 
 export interface LobbyState {
   code: string;
@@ -39,11 +40,20 @@ export class RelayClient {
   onStart: (s: MatchSetup) => void = () => {};
   /** connection lost or refused (code is set when the room refused us) */
   onClose: (code: ErrorCode | null) => void = () => {};
-  onInputs: (p: InputPacket) => void = () => {};
-  onLeft: (slot: number, tick: number) => void = () => {};
+  /** where input packets go during a match (see setInputSink) */
+  private inputSink: ((p: InputPacket) => void) | null = null;
+  /** packets that arrived before our match started (a peer's direct channel can beat the relay's start message) */
+  private early: InputPacket[] = [];
+  onLeaving: (slot: number) => void = () => {};
+  onLeft: (slot: number, tick: number, from: number, source: number) => void = () => {};
+  onFill: (slot: number, first: number, data: number[]) => void = () => {};
+  /** direct channels to the other players (created once the room admits us) */
+  mesh: PeerMesh | null = null;
   onHash: (slot: number, tick: number, h: number) => void = () => {};
   private readonly ws: WebSocket;
   private ping = 0;
+  private pings = 0;
+  private inMatch = false;
   private closed = false;
   private error: ErrorCode | null = null;
 
@@ -58,7 +68,10 @@ export class RelayClient {
     this.ws.addEventListener('open', () => {
       this.send({ t: 'hello', name, build });
       this.sendPing();
-      this.ping = window.setInterval(() => this.sendPing(), NET.pingIntervalMs);
+      this.ping = window.setInterval(() => {
+        // fewer relay messages during a match (they count against the free plan)
+        if (!this.inMatch || ++this.pings % Math.round(NET.matchPingIntervalMs / NET.pingIntervalMs) === 0) this.sendPing();
+      }, NET.pingIntervalMs);
     });
     this.ws.addEventListener('message', (ev) => this.receive(ev.data as string | ArrayBuffer));
     this.ws.addEventListener('close', () => this.shutdown());
@@ -85,6 +98,37 @@ export class RelayClient {
     });
   }
 
+  /**
+   * Route input packets to the running match (null between matches). Packets
+   * that came in early are handed over; the match drops other matches' ones.
+   */
+  setInputSink(sink: ((p: InputPacket) => void) | null): void {
+    this.inputSink = sink;
+    if (!sink) return;
+    const early = this.early;
+    this.early = [];
+    for (const p of early) sink(p);
+  }
+
+  private deliverInputs(p: InputPacket): void {
+    if (this.inputSink) this.inputSink(p);
+    else if (this.early.length < 4096) this.early.push(p);
+  }
+
+  /** Relay pings are thinned out while a match runs. */
+  setInMatch(on: boolean): void {
+    this.inMatch = on;
+  }
+
+  /**
+   * Send an input packet to the other players: directly where a channel is
+   * open, through the relay if any of them has none.
+   */
+  sendInputs(buf: ArrayBuffer): void {
+    const targets = (this.lobby?.players ?? []).map((p) => p.slot).filter((s) => s !== this.slot);
+    if (!this.mesh || !this.mesh.sendInputs(buf, targets)) this.raw(buf);
+  }
+
   get isHost(): boolean {
     return !!this.lobby && this.lobby.host === this.slot;
   }
@@ -100,6 +144,7 @@ export class RelayClient {
   close(): void {
     this.closed = true;
     window.clearInterval(this.ping);
+    this.mesh?.close();
     try {
       this.ws.close(1000);
     } catch {
@@ -107,14 +152,21 @@ export class RelayClient {
     }
   }
 
+  /** Report the slowest input path: direct channel where open, else the relay. */
   private sendPing(): void {
-    this.send({ t: 'ping', c: performance.now(), rtt: this.rtt });
+    let worst = this.rtt;
+    const others = (this.lobby?.players ?? []).filter((p) => p.slot !== this.slot);
+    if (others.length) {
+      worst = 0;
+      for (const o of others) worst = Math.max(worst, this.mesh?.rttTo(o.slot) ?? this.rtt);
+    }
+    this.send({ t: 'ping', c: performance.now(), rtt: Math.round(worst) });
   }
 
   private receive(data: string | ArrayBuffer): void {
     if (typeof data !== 'string') {
       const p = decodeInputs(data);
-      if (p) this.onInputs(p);
+      if (p) this.deliverInputs(p);
       return;
     }
     let m: ServerMsg;
@@ -126,16 +178,31 @@ export class RelayClient {
     switch (m.t) {
       case 'welcome':
         this.slot = m.slot;
+        if (typeof RTCPeerConnection !== 'undefined') {
+          this.mesh = new PeerMesh(m.slot, (to, data) => this.send({ t: 'signal', to, data }));
+          this.mesh.onInputs = (p) => this.deliverInputs(p);
+          this.mesh.onLinks = (open) => this.send({ t: 'links', p2p: open });
+        }
         break;
       case 'lobby':
         this.lobby = { code: m.code, host: m.host, players: m.players, config: m.config, state: m.state };
+        this.mesh?.sync(m.players.map((p) => p.slot));
         this.onLobby(this.lobby);
+        break;
+      case 'signal':
+        void this.mesh?.handleSignal(m.from, m.data as Parameters<PeerMesh['handleSignal']>[1]);
+        break;
+      case 'leaving':
+        this.onLeaving(m.slot);
+        break;
+      case 'fill':
+        this.onFill(m.slot, m.first, m.data);
         break;
       case 'start':
         this.onStart(m.setup);
         break;
       case 'left':
-        this.onLeft(m.slot, m.tick);
+        this.onLeft(m.slot, m.tick, m.from, m.source);
         break;
       case 'hash':
         this.onHash(m.slot, m.tick, m.h);
@@ -160,6 +227,7 @@ export class RelayClient {
 
   private shutdown(): void {
     window.clearInterval(this.ping);
+    this.mesh?.close();
     if (this.closed) return;
     this.closed = true;
     this.onClose(this.error);

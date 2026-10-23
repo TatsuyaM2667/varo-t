@@ -494,6 +494,7 @@ export class App {
     if (document.pointerLockElement) document.exitPointerLock();
     this.input.enabled = false;
     this.state = "lobby";
+    this.net.setInMatch(false);
     this.ensureAttract();
     this.attract!.setShowcase(false);
     this.renderLobby();
@@ -539,7 +540,8 @@ export class App {
     const lockstep = new Lockstep({
       setup,
       localSlot: c.slot,
-      send: (d) => c.raw(d),
+      sendInputs: (d) => c.sendInputs(d),
+      sendControl: (m) => c.send(m),
       onDesync: (tick) => {
         console.warn(`[net] state hash mismatch at tick ${tick}`);
         this.match?.hud.notice(t("desync"));
@@ -558,6 +560,7 @@ export class App {
   private onMatchEnd(r: MatchResult): void {
     this.lastResult = r;
     this.submitted = false;
+    this.net?.setInMatch(false);
     // the room returns to its lobby once the host's match is over
     if (r.multiplayer && this.net?.isHost) this.net.send({ t: "reset" });
     // let the final banner play for a moment
@@ -633,8 +636,10 @@ export class App {
   }
 
   private onIdle(): void {
-    // waiting in a room for friends is not "abandoned"
+    // waiting in a room for friends is not "abandoned", and leaving an online
+    // match (e.g. while spectating after death) would hand our agent to a bot
     if (this.state === "title" || this.state === "lobby") return;
+    if (this.state === "match" && this.match?.plan.net) return;
     console.info("[exhibit] idle → title");
     this.goTitle();
   }

@@ -20,3 +20,6 @@ declare class WebSocketPair {
 interface ResponseInit {
   webSocket?: WebSocket;
 }
+interface DurableObjectState {
+  storage: unknown;
+}

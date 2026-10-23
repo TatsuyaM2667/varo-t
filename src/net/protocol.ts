@@ -2,8 +2,15 @@
  * Wire protocol shared by the game client and the relay Worker (server/).
  * Pure TS: no DOM, no Babylon, so the Worker bundle can import it.
  *
+ * During a match, input packets go peer-to-peer over WebRTC data channels
+ * where possible (free and fast); the relay carries the lobby, WebRTC
+ * signaling, hashes, leave handling, and inputs for pairs that could not
+ * connect directly.
+ *
  * Control messages are JSON text frames. Inputs travel as binary frames:
- *   [u8 KIND_INPUTS][u8 slot][u32 firstTick][u8 count] + count × [u32 packed, u32 yaw]
+ *   [u8 KIND_INPUTS][u8 slot][u32 firstTick][u8 count][u16 match] + count × [u32 packed, u32 yaw]
+ * `match` (low bits of the match seed) keeps a late packet from the previous
+ * match out of the next one.
  * The client writes slot 255; the relay stamps the sender's real slot.
  */
 import { BOT_NAMES } from '../config/bots';
@@ -33,8 +40,10 @@ export interface LobbyPlayer {
   slot: number;
   name: string;
   team: 0 | 1;
-  /** last round-trip time to the relay, ms */
+  /** conservative round trip on this player's slowest input path, ms */
   rtt: number;
+  /** slots this player has an open peer-to-peer channel with */
+  p2p: number[];
 }
 
 export interface MatchSetup {
@@ -44,6 +53,8 @@ export interface MatchSetup {
   players: { slot: number; name: string; team: 0 | 1 }[];
   /** input delay in ticks, identical for everyone */
   delay: number;
+  /** ticks per input packet (1 when every pair is peer-to-peer: those packets cost nothing) */
+  batch?: number;
   features: SimFeatures;
 }
 
@@ -54,7 +65,14 @@ export type ClientMsg =
   | { t: 'start'; features: SimFeatures }
   | { t: 'reset' }
   | { t: 'ping'; c: number; rtt: number }
-  | { t: 'hash'; tick: number; h: number };
+  | { t: 'hash'; tick: number; h: number }
+  /** WebRTC offer/answer/candidate for one peer */
+  | { t: 'signal'; to: number; data: unknown }
+  | { t: 'links'; p2p: number[] }
+  /** reply to `leaving`: we hold that player's inputs up to `next` − 1 */
+  | { t: 'known'; slot: number; next: number }
+  /** a leaver's frames (packed pairs, see packInput) re-sent to everyone */
+  | { t: 'fill'; slot: number; first: number; data: number[] };
 
 export type ErrorCode = 'full' | 'inGame' | 'version' | 'badRoom';
 
@@ -62,13 +80,16 @@ export type ServerMsg =
   | { t: 'welcome'; slot: number }
   | { t: 'lobby'; code: string; host: number; players: LobbyPlayer[]; config: RoomConfig; state: 'lobby' | 'game' }
   | { t: 'start'; setup: MatchSetup }
-  | { t: 'left'; slot: number; tick: number }
   | { t: 'pong'; c: number }
   | { t: 'hash'; slot: number; tick: number; h: number }
+  | { t: 'signal'; from: number; data: unknown }
+  | { t: 'leaving'; slot: number }
+  | { t: 'left'; slot: number; tick: number; from: number; source: number }
+  | { t: 'fill'; slot: number; first: number; data: number[] }
   | { t: 'error'; code: ErrorCode };
 
 export const KIND_INPUTS = 1;
-export const INPUT_HEADER = 7;
+export const INPUT_HEADER = 9;
 export const INPUT_STRIDE = 8;
 
 /** Room codes: 4 characters without look-alikes (0/O, 1/I/L). */
@@ -81,13 +102,17 @@ export function randomRoomCode(rand: () => number): string {
   return s;
 }
 
-export function encodeInputs(firstTick: number, frames: readonly InputFrame[], slot = 255): ArrayBuffer {
+/** The match tag carried by input packets. */
+export const matchTag = (setup: MatchSetup): number => setup.seed & 0xffff;
+
+export function encodeInputs(firstTick: number, frames: readonly InputFrame[], match = 0, slot = 255): ArrayBuffer {
   const buf = new ArrayBuffer(INPUT_HEADER + frames.length * INPUT_STRIDE);
   const v = new DataView(buf);
   v.setUint8(0, KIND_INPUTS);
   v.setUint8(1, slot);
   v.setUint32(2, firstTick);
   v.setUint8(6, frames.length);
+  v.setUint16(7, match);
   frames.forEach((f, i) => {
     const [a, yaw] = packInput(f);
     v.setUint32(INPUT_HEADER + i * INPUT_STRIDE, a);
@@ -98,6 +123,7 @@ export function encodeInputs(firstTick: number, frames: readonly InputFrame[], s
 
 export interface InputPacket {
   slot: number;
+  match: number;
   firstTick: number;
   frames: InputFrame[];
 }
@@ -114,14 +140,14 @@ export function decodeInputs(buf: ArrayBuffer): InputPacket | null {
     const f = unpackInput(v.getUint32(INPUT_HEADER + i * INPUT_STRIDE), v.getUint32(INPUT_HEADER + i * INPUT_STRIDE + 4));
     if (f) frames.push(f);
   }
-  return { slot: v.getUint8(1), firstTick: v.getUint32(2), frames };
+  return { slot: v.getUint8(1), firstTick: v.getUint32(2), match: v.getUint16(7), frames };
 }
 
-/** Input delay (ticks) that covers the worst player's round trip through the relay. */
-export function computeDelay(rtts: readonly number[]): number {
+/** Input delay (ticks) that covers the worst player's input path and the batching. */
+export function computeDelay(rtts: readonly number[], batch: number = NET.sendEveryTicks): number {
   const worst = Math.max(0, ...rtts);
   const tickMs = 1000 / MOVEMENT.tickRate;
-  const d = Math.ceil((worst + NET.jitterMs) / tickMs) + NET.sendEveryTicks - 1;
+  const d = Math.ceil((worst + NET.jitterMs) / tickMs) + batch - 1;
   return Math.min(NET.maxDelayTicks, Math.max(NET.minDelayTicks, d));
 }
 

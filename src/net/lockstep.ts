@@ -4,25 +4,41 @@
  * is scheduled for tick t + delay and sent to the others right away, so
  * with delay ≥ one-way latency nobody ever waits.
  *
- * Transport-agnostic: `send` hands out encoded packets, `receive*` takes
- * what the relay delivered. Pure TS (Node tests drive it with a fake relay).
+ * Transport-agnostic: `sendInputs` hands out encoded packets (peer-to-peer
+ * or through the relay), `sendControl` goes to the relay, `receive*` takes
+ * what arrived. Pure TS (Node tests drive it with a fake network).
+ *
+ * Leaving: inputs mostly travel peer-to-peer, so the relay cannot know how
+ * far a leaver got. It announces `leaving`; everyone stops accepting that
+ * player's inputs and reports how far they have them (`known`); the relay
+ * picks the furthest (nobody can have simulated past their own), and that
+ * client re-sends the missing frames to the others (`fill`). The bot takes
+ * over at that tick on every client.
  */
 import { NET } from '../config/net';
 import type { InputFrame } from '../sim/input-frame';
 import type { World } from '../sim/world';
-import { type MatchSetup, buildMatch, encodeInputs } from './protocol';
+import { type ClientMsg, type MatchSetup, buildMatch, encodeInputs, matchTag } from './protocol';
+import { packInput, unpackInput } from '../sim/replay/input-log';
 
 export interface LockstepOptions {
   setup: MatchSetup;
   localSlot: number;
-  send(data: ArrayBuffer | string): void;
+  /** our input packets, to every other player */
+  sendInputs(data: ArrayBuffer): void;
+  /** control messages to the relay */
+  sendControl(msg: ClientMsg): void;
   /** called when two clients disagree about the state at some tick */
   onDesync?(tick: number, slot: number): void;
 }
 
 export class Lockstep {
   readonly delay: number;
+  /** ticks per input packet */
+  readonly batch: number;
   readonly localAgent: number;
+  /** tag of this match's input packets (see matchTag) */
+  readonly tag: number;
   readonly humanIds: number[];
   private readonly slotAgent: Map<number, number>;
   /** next tick whose input is still missing, per human agent (contiguous receipt) */
@@ -31,6 +47,10 @@ export class Lockstep {
   private readonly frames = new Map<number, (InputFrame | undefined)[]>();
   /** humans that left: agent id → first tick simulated as a bot */
   private readonly leftAt = new Map<number, number>();
+  /** humans announced as leaving: their inputs are no longer accepted (except fills) */
+  private readonly frozen = new Set<number>();
+  /** every remote input seen, by agent then tick (for fills) */
+  private readonly archive = new Map<number, InputFrame[]>();
   /** next local input tick to generate */
   private nextLocal: number;
   private pending: InputFrame[] = [];
@@ -42,6 +62,8 @@ export class Lockstep {
   constructor(private readonly o: LockstepOptions) {
     const built = buildMatch(o.setup);
     this.delay = o.setup.delay;
+    this.batch = Math.max(1, o.setup.batch ?? NET.sendEveryTicks);
+    this.tag = matchTag(o.setup);
     this.slotAgent = built.agentOfSlot;
     this.humanIds = built.humanIds;
     this.localAgent = built.agentOfSlot.get(o.localSlot) ?? -1;
@@ -63,38 +85,78 @@ export class Lockstep {
       if (!this.pending.length) this.pendingFirst = this.nextLocal;
       this.pending.push(f);
       this.nextLocal++;
-      if (this.pending.length >= NET.sendEveryTicks) this.flush();
+      if (this.pending.length >= this.batch) this.flush();
     }
   }
 
   /** Send the partial batch now. Call whenever the sim stalls, or two stalled clients would wait on each other forever. */
   flush(): void {
     if (!this.pending.length) return;
-    this.o.send(encodeInputs(this.pendingFirst, this.pending));
+    this.o.sendInputs(encodeInputs(this.pendingFirst, this.pending, this.tag));
     this.pending = [];
   }
 
-  receiveInputs(slot: number, firstTick: number, frames: readonly InputFrame[]): void {
+  /** `match`: the packet's tag; packets of another match are ignored. */
+  receiveInputs(slot: number, firstTick: number, frames: readonly InputFrame[], match = this.tag): void {
+    if (match !== this.tag) return;
     const agent = this.slotAgent.get(slot);
-    if (agent === undefined || agent === this.localAgent) return;
+    if (agent === undefined || agent === this.localAgent || this.frozen.has(agent)) return;
+    this.accept(agent, firstTick, frames);
+  }
+
+  private accept(agent: number, firstTick: number, frames: readonly InputFrame[]): void {
     const left = this.leftAt.get(agent);
+    let arch = this.archive.get(agent);
+    if (!arch) this.archive.set(agent, (arch = []));
     let next = this.known.get(agent) ?? this.delay;
     frames.forEach((f, i) => {
       const t = firstTick + i;
       if (left !== undefined && t >= left) return;
+      if (arch[t] !== undefined) return; // duplicate (peer-to-peer and relay both delivered it)
+      arch[t] = f;
       this.put(agent, t, f);
       if (t === next) next++;
     });
-    // packets arrive in order through the relay, but be tolerant of gaps
-    while (this.frames.get(next)?.[agent] !== undefined) next++;
+    // packets may arrive out of order (two paths): advance over whatever is contiguous
+    while (arch[next] !== undefined) next++;
     this.known.set(agent, next);
   }
 
-  /** The relay says `slot` disconnected; from `tick` on a bot plays that agent. */
-  receiveLeft(slot: number, tick: number): void {
+  /** The relay says `slot` disconnected: stop taking its inputs and report how far we have them. */
+  receiveLeaving(slot: number): void {
+    const agent = this.slotAgent.get(slot);
+    if (agent === undefined || agent === this.localAgent) return;
+    this.frozen.add(agent);
+    this.o.sendControl({ t: 'known', slot, next: this.known.get(agent) ?? this.delay });
+  }
+
+  /**
+   * From `tick` on a bot plays `slot`'s agent. Players are missing frames
+   * from `from`; if we are the `source`, we send them.
+   */
+  receiveLeft(slot: number, tick: number, from = tick, source = -1): void {
     const agent = this.slotAgent.get(slot);
     if (agent === undefined || this.leftAt.has(agent)) return;
+    this.frozen.add(agent);
     this.leftAt.set(agent, Math.max(this.delay, tick));
+    if (source !== this.o.localSlot || from >= tick) return;
+    const arch = this.archive.get(agent) ?? [];
+    const data: number[] = [];
+    for (let t = Math.max(this.delay, from); t < tick; t++) data.push(...packInput(arch[t]));
+    this.o.sendControl({ t: 'fill', slot, first: Math.max(this.delay, from), data });
+  }
+
+  /** Frames of a leaver re-sent by the player who had the most of them. */
+  receiveFill(slot: number, first: number, data: readonly number[]): void {
+    const agent = this.slotAgent.get(slot);
+    if (agent === undefined || agent === this.localAgent) return;
+    const frames: InputFrame[] = [];
+    for (let i = 0; i + 1 < data.length; i += 2) {
+      const f = unpackInput(data[i] >>> 0, data[i + 1] >>> 0);
+      if (!f) break;
+      frames.push(f);
+    }
+    this.accept(agent, first, frames);
   }
 
   private put(agent: number, tick: number, f: InputFrame): void {
@@ -154,7 +216,7 @@ export class Lockstep {
   noteHash(tick: number, h: number): void {
     if (tick % NET.hashEveryTicks !== 0) return;
     this.hashes.set(tick, h);
-    this.o.send(JSON.stringify({ t: 'hash', tick, h }));
+    this.o.sendControl({ t: 'hash', tick, h });
     this.checkHashes();
   }
 

@@ -183,10 +183,13 @@ export class MatchMode {
   /** Route relay traffic into the lockstep and surface joins/leaves/desyncs on the HUD. */
   private wireNet(): void {
     const { lockstep, client } = this.net!;
-    client.onInputs = (p) => lockstep.receiveInputs(p.slot, p.firstTick, p.frames);
+    client.setInputSink((p) => lockstep.receiveInputs(p.slot, p.firstTick, p.frames, p.match));
     client.onHash = (slot, tick, h) => lockstep.receiveHash(slot, tick, h);
-    client.onLeft = (slot, tick) => {
-      lockstep.receiveLeft(slot, tick);
+    client.onLeaving = (slot) => lockstep.receiveLeaving(slot);
+    client.onFill = (slot, first, data) => lockstep.receiveFill(slot, first, data);
+    client.setInMatch(true);
+    client.onLeft = (slot, tick, from, source) => {
+      lockstep.receiveLeft(slot, tick, from, source);
       const name = this.plan.options.roster[lockstep.agentOfSlot(slot)]?.name ?? '?';
       this.hud.notice(`${name} ${t('playerLeftBot')}`);
     };
@@ -555,6 +558,7 @@ export class MatchMode {
   }
 
   dispose(): void {
+    this.net?.client.setInputSink(null);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     this.stopKillcam();

@@ -136,6 +136,10 @@ const DICT = {
   disconnected: { ja: "接続が切れました", en: "CONNECTION LOST" },
   waitingPlayers: { ja: "他のプレイヤーを待っています…", en: "Waiting for other players…" },
   desync: { ja: "同期ズレを検出しました", en: "Desync detected" },
+  linkP2p: { ja: "直接", en: "DIRECT" },
+  linkRelay: { ja: "中継", en: "RELAY" },
+  linkP2pHint: { ja: "このプレイヤーとは直接通信（速い・無料枠を使わない）", en: "Direct connection (fast, free)" },
+  linkRelayHint: { ja: "このプレイヤーとはサーバ中継（直接つながらない回線）", en: "Through the relay (no direct path)" },
   inputDelay: { ja: "入力遅延（目安）", en: "Input delay (est.)" },
   onlineOverlay: {
     ja: "操作が外れています — 試合は止まりません",

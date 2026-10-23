@@ -443,8 +443,14 @@ export function lobbyScreen(
           `<button data-v="${v}" class="${String(c[key]) === String(v) ? "on" : ""}" ${host ? "" : "disabled"}>${label}</button>`,
       )
       .join("")}</div>`;
+  const myLinks = me?.p2p ?? [];
+  const link = (p: LobbyState["players"][number]) => {
+    if (p.slot === mySlot) return "";
+    const direct = myLinks.includes(p.slot) || p.p2p.includes(mySlot);
+    return `<small class="tag ${direct ? "p2p" : "relay"}" title="${direct ? t("linkP2pHint") : t("linkRelayHint")}">${direct ? t("linkP2p") : t("linkRelay")}</small>`;
+  };
   const player = (p: LobbyState["players"][number]) =>
-    `<div class="mp-player${p.slot === mySlot ? " me" : ""}"><b>${esc(p.name)}</b>${p.slot === lobby.host ? `<small class="tag">${t("hostTag")}</small>` : ""}${p.slot === mySlot ? `<small class="tag you">${t("youTag")}</small>` : ""}<span class="ping">${p.rtt ? `${p.rtt} ms` : "—"}</span></div>`;
+    `<div class="mp-player${p.slot === mySlot ? " me" : ""}"><b>${esc(p.name)}</b>${p.slot === lobby.host ? `<small class="tag">${t("hostTag")}</small>` : ""}${p.slot === mySlot ? `<small class="tag you">${t("youTag")}</small>` : ""}${link(p)}<span class="ping">${p.rtt ? `${p.rtt} ms` : "—"}</span></div>`;
   const column = (team: 0 | 1) => {
     const list = lobby.players.filter((p) => !versus || p.team === team);
     return `<div class="mp-team ${team === 0 ? "atk" : "def"}"><h4>${team === 0 ? t("attackersTeam") : t("defendersTeam")}</h4>${

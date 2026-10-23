@@ -6,7 +6,15 @@ compatibility_date = "2026-07-01"
 name = "ROOMS"
 class_name = "Room"
 
+[[durable_objects.bindings]]
+name = "STATS"
+class_name = "Stats"
+
 # Free plan: Durable Objects must use the SQLite storage backend.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Stats"]

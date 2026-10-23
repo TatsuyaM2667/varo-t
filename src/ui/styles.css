@@ -1129,3 +1129,11 @@ button {
     font-size: 13px;
     text-align: right;
 }
+.mp-player .tag.p2p {
+    color: #7ee08a;
+    border-color: #7ee08a;
+}
+.mp-player .tag.relay {
+    color: var(--atk);
+    border-color: var(--atk);
+}

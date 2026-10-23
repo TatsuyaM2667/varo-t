@@ -16,6 +16,8 @@
   },
   "include": [
     "relay.ts",
-    "workers.d.ts"
+    "workers.d.ts",
+    "stats-core.ts",
+    "admin-page.ts"
   ]
 }

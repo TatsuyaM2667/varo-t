@@ -8,6 +8,7 @@ import { InputLog, RoundReplay } from '../../src/sim/replay/input-log';
 import { World } from '../../src/sim/world';
 import { Lockstep, runLockstepTicks } from '../../src/net/lockstep';
 import {
+  type InputPacket,
   type MatchSetup,
   type ServerMsg,
   buildMatch,
@@ -32,8 +33,9 @@ describe('protocol', () => {
       { buttons: Btn.Forward | Btn.Fire, yaw: 65535, pitch: -9000 },
       { buttons: 0, yaw: 0, pitch: 12000 },
     ];
-    const p = decodeInputs(encodeInputs(4242, frames))!;
+    const p = decodeInputs(encodeInputs(4242, frames, 0xbeef))!;
     expect(p.firstTick).toBe(4242);
+    expect(p.match).toBe(0xbeef);
     expect(p.slot).toBe(255);
     expect(p.frames).toEqual(frames);
     expect(decodeInputs(new ArrayBuffer(3))).toBeNull();
@@ -84,14 +86,19 @@ class FakeNet {
     private readonly rng: Rng,
     private readonly latency: [number, number],
   ) {}
-  link(key: unknown, to: (d: string | ArrayBuffer) => void): (d: string | ArrayBuffer) => void {
+  link(key: unknown, to: (d: string | ArrayBuffer) => void, latency = this.latency): (d: string | ArrayBuffer) => void {
     return (data) => {
-      const lat = this.latency[0] + this.rng.float() * (this.latency[1] - this.latency[0]);
+      const lat = latency[0] + this.rng.float() * (latency[1] - latency[0]);
       const at = Math.max(this.lastAt.get(key) ?? 0, this.now + lat);
       this.lastAt.set(key, at);
       // copy binary payloads: the room stamps the slot in place
       this.queue.push({ at, to, data: typeof data === 'string' ? data : data.slice(0) });
     };
+  }
+
+  /** run `fn` at now + ms (the room's timers) */
+  later(fn: () => void, ms: number): void {
+    this.queue.push({ at: this.now + ms, to: fn, data: '' });
   }
 }
 
@@ -112,13 +119,14 @@ interface Client {
 
 /**
  * Plays a full online match headlessly: a RoomCore relay, N clients with
- * jittery frame rates and random latency, random human inputs. Returns the
- * clients so tests can compare their worlds.
+ * jittery frame rates and random latency, random human inputs. `direct`
+ * lists the client pairs (by creation index) that have a peer-to-peer
+ * channel (fast, 2–12 ms); the others exchange inputs through the relay.
  */
-function playOnline(opts: { players: number; mode: 'coop' | 'versus'; ticks: number; leaveAt?: { slot: number; ms: number } }) {
+function playOnline(opts: { players: number; mode: 'coop' | 'versus'; ticks: number; leaveAt?: { slot: number; ms: number }; direct?: [number, number][] }) {
   const rng = new Rng(77);
   const net = new FakeNet(rng, [15, 70]);
-  const room = new RoomCore('TEST', () => rng.float());
+  const room = new RoomCore('TEST', () => rng.float(), (fn, ms) => net.later(fn, ms));
   const clients: Client[] = [];
   for (let i = 0; i < opts.players; i++) {
     const c = { slot: -1, step: new FixedStep(1 / 60), rng: new Rng(100 + i), gone: false, frameMs: 1000 / (50 + i * 23), nextFrame: 0, hashes: new Map() } as Client;
@@ -132,11 +140,40 @@ function playOnline(opts: { players: number; mode: 'coop' | 'versus'; ticks: num
     clients.push(c);
   }
   const up = (c: Client) => (c as Client & { up: (d: string | ArrayBuffer) => void }).up;
+  const direct = new Map<string, (d: string | ArrayBuffer) => void>();
+  for (const [a, b] of opts.direct ?? []) {
+    for (const [from, to] of [[a, b], [b, a]]) {
+      const dst = clients[to];
+      direct.set(`${from}>${to}`, net.link(`p2p${from}>${to}`, (d) => {
+        if (dst.gone || typeof d === 'string') return;
+        const p = decodeInputs(d);
+        if (p) deliver(dst, { ...p, slot: clients[from].slot });
+      }, [2, 12]));
+    }
+  }
+  /** what RelayClient does with input packets: hold them until the match starts */
+  const early = new Map<Client, InputPacket[]>();
+  const deliver = (c: Client, p: InputPacket) => {
+    if (c.ls) c.ls.receiveInputs(p.slot, p.firstTick, p.frames, p.match);
+    else early.set(c, [...(early.get(c) ?? []), p]);
+  };
+  /** what RelayClient.sendInputs does: direct where possible, the relay if anyone lacks a channel */
+  const sendInputs = (c: Client) => (buf: ArrayBuffer) => {
+    const i = clients.indexOf(c);
+    let viaRelay = false;
+    clients.forEach((o, j) => {
+      if (o === c || o.gone) return;
+      const d = direct.get(`${i}>${j}`);
+      if (d) d(buf);
+      else viaRelay = true;
+    });
+    if (viaRelay) up(c)(buf);
+  };
 
   function onServer(c: Client, d: string | ArrayBuffer): void {
     if (typeof d !== 'string') {
       const p = decodeInputs(d);
-      if (p) c.ls?.receiveInputs(p.slot, p.firstTick, p.frames);
+      if (p) deliver(c, p);
       return;
     }
     const m = JSON.parse(d) as ServerMsg;
@@ -145,12 +182,24 @@ function playOnline(opts: { players: number; mode: 'coop' | 'versus'; ticks: num
       if (opts.mode === 'versus' && m.config.mode !== 'versus') up(c)(JSON.stringify({ t: 'config', config: { ...m.config, mode: 'versus', teamSize: 2 } }));
       else up(c)(JSON.stringify({ t: 'start', features: FEATURES }));
     } else if (m.t === 'start') {
-      c.ls = new Lockstep({ setup: m.setup, localSlot: c.slot, send: up(c), onDesync: (tick) => { throw new Error(`desync at ${tick}`); } });
+      c.ls = new Lockstep({
+        setup: m.setup,
+        localSlot: c.slot,
+        sendInputs: sendInputs(c),
+        sendControl: (msg) => up(c)(JSON.stringify(msg)),
+        onDesync: (tick) => {
+          throw new Error(`desync at ${tick}`);
+        },
+      });
       const built = buildMatch(m.setup);
       c.world = new World(built.options);
       c.world.startMatch();
       c.log = new InputLog(built.options, built.humanIds);
-    } else if (m.t === 'left') c.ls?.receiveLeft(m.slot, m.tick);
+      for (const p of early.get(c) ?? []) deliver(c, p);
+      early.delete(c);
+    } else if (m.t === 'leaving') c.ls?.receiveLeaving(m.slot);
+    else if (m.t === 'left') c.ls?.receiveLeft(m.slot, m.tick, m.from, m.source);
+    else if (m.t === 'fill') c.ls?.receiveFill(m.slot, m.first, m.data);
     else if (m.t === 'hash') c.ls?.receiveHash(m.slot, m.tick, m.h);
   }
 
@@ -196,7 +245,7 @@ function deliverAll(net: FakeNet): void {
   q.sort((a, b) => a.at - b.at);
   while (q.length && q[0].at <= net.now) {
     const m = q.shift()!;
-    m.to(m.data);
+    (m.to as (d: string | ArrayBuffer) => void)(m.data);
   }
 }
 
@@ -211,6 +260,13 @@ function commonHashes(a: Map<number, number>, b: Map<number, number>): number {
 }
 
 describe('online lockstep', () => {
+  it('stays identical when every pair is peer-to-peer', () => {
+    const { clients } = playOnline({ players: 4, mode: 'coop', ticks: 1500, direct: [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]] });
+    for (const c of clients) expect(c.world!.tick).toBeGreaterThanOrEqual(1500);
+    expect(commonHashes(clients[0].hashes, clients[3].hashes)).toBeGreaterThan(20);
+    expect(clients.every((c) => !c.ls!.desynced)).toBe(true);
+  }, 60_000);
+
   it('keeps three coop clients bit-identical under jitter and latency', () => {
     const { clients } = playOnline({ players: 3, mode: 'coop', ticks: 1500 });
     for (const c of clients) expect(c.world!.tick).toBeGreaterThanOrEqual(1500);
@@ -220,7 +276,8 @@ describe('online lockstep', () => {
   }, 60_000);
 
   it('versus: a player who leaves becomes a bot at the same tick everywhere, and replays stay exact', () => {
-    const { clients } = playOnline({ players: 3, mode: 'versus', ticks: 9000, leaveAt: { slot: 1, ms: 9000 } });
+    // mixed paths: the leaver talks to one player directly and to the other through the relay
+    const { clients } = playOnline({ players: 3, mode: 'versus', ticks: 9000, leaveAt: { slot: 1, ms: 9000 }, direct: [[0, 1], [0, 2]] });
     const [a, c] = clients.filter((x) => !x.gone);
     expect(commonHashes(a.hashes, c.hashes)).toBeGreaterThan(100);
     const leaver = a.ls!.agentOfSlot(1);
@@ -281,8 +338,9 @@ describe('relay room', () => {
     hello(room, late.c);
     expect(late.got).toContainEqual({ t: 'error', code: 'inGame' });
     room.close(h.c);
-    const left = g.got.find((m) => m.t === 'left');
-    expect(left && left.t === 'left' && left.slot).toBe(0);
+    expect(g.got).toContainEqual({ t: 'leaving', slot: 0 });
+    room.message(g.c, JSON.stringify({ t: 'known', slot: 0, next: 321 }));
+    expect(g.got).toContainEqual({ t: 'left', slot: 0, tick: 321, from: 321, source: 1 });
     const lobby = g.got.filter((m) => m.t === 'lobby').at(-1)!;
     expect(lobby.t === 'lobby' && lobby.host).toBe(1);
   });
