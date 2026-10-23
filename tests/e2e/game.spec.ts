@@ -119,9 +119,14 @@ test('custom key bindings from storage drive the game', async ({ page }) => {
   await page.waitForTimeout(800);
   await page.keyboard.up('ArrowUp');
   expect((await pos()).z - z0).toBeGreaterThan(0.5);
+  const y0 = (await pos()).y;
   await page.keyboard.down('KeyJ');
-  await page.waitForTimeout(150);
-  expect((await pos()).y).toBeGreaterThan(0.1);
+  // poll: under parallel load (SwiftShader) frames are slow, so a fixed wait can miss the airtime
+  await page.waitForFunction(
+    (y0) => ((window as unknown as Hooks).__game.app.debugState().match!.world.agents[0] as unknown as { y: number }).y > y0 + 0.1,
+    y0,
+    { timeout: 2_000, polling: 16 },
+  );
   await page.keyboard.up('KeyJ');
   expect(errors).toEqual([]);
 });
