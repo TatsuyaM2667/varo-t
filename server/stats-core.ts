@@ -60,8 +60,17 @@ export function estimate(u: Usage): { doRequests: number; workerRequests: number
 }
 
 export class StatsCore {
-  private readonly live = new Map<string, LiveRoom>();
+  /** live rooms, mirrored to storage (`live:<code>`) so a restarted object still knows them */
+  private live: Map<string, LiveRoom> | null = null;
   private cache = new Map<string, Usage>();
+
+  private async liveMap(): Promise<Map<string, LiveRoom>> {
+    if (!this.live) {
+      this.live = new Map();
+      for (const [k, v] of await this.store.list<LiveRoom>({ prefix: 'live:' })) this.live.set(k.slice(5), v);
+    }
+    return this.live;
+  }
 
   constructor(private readonly store: KvStore) {}
 
@@ -83,14 +92,19 @@ export class StatsCore {
       for (const f of ['connects', 'msgsIn', 'bytesIn', 'msgsOut', 'bytesOut', 'matches'] as const) u[f] += Math.max(0, r.delta[f] | 0);
       u.reports++;
     }
-    const prev = this.live.get(r.code);
-    if (r.closed || !r.snapshot || !r.snapshot.players.length) this.live.delete(r.code);
-    else {
+    const live = await this.liveMap();
+    const prev = live.get(r.code);
+    if (r.closed || !r.snapshot || !r.snapshot.players.length) {
+      live.delete(r.code);
+      await this.store.delete([`live:${r.code}`]);
+    } else {
       const traffic = prev?.traffic ?? { connects: 0, msgsIn: 0, bytesIn: 0, msgsOut: 0, bytesOut: 0, matches: 0 };
       for (const f of Object.keys(traffic) as (keyof RoomTraffic)[]) traffic[f] += Math.max(0, r.delta[f] | 0);
-      this.live.set(r.code, { ...r.snapshot, updatedAt: now, since: prev?.since ?? now, traffic });
+      const room: LiveRoom = { ...r.snapshot, updatedAt: now, since: prev?.since ?? now, traffic };
+      live.set(r.code, room);
+      await this.store.put(`live:${r.code}`, room);
     }
-    const players = this.liveRooms(now).reduce((n, room) => n + room.players.length, 0);
+    const players = (await this.liveRooms(now)).reduce((n, room) => n + room.players.length, 0);
     for (const k of keys) {
       const u = await this.usage(k);
       u.peakPlayers = Math.max(u.peakPlayers, players);
@@ -98,9 +112,12 @@ export class StatsCore {
     }
   }
 
-  liveRooms(now: number): LiveRoom[] {
-    for (const [code, room] of this.live) if (now - room.updatedAt > STALE_MS) this.live.delete(code);
-    return [...this.live.values()].sort((a, b) => a.since - b.since);
+  async liveRooms(now: number): Promise<LiveRoom[]> {
+    const live = await this.liveMap();
+    const stale = [...live].filter(([, room]) => now - room.updatedAt > STALE_MS).map(([code]) => code);
+    for (const code of stale) live.delete(code);
+    if (stale.length) await this.store.delete(stale.map((c) => `live:${c}`));
+    return [...live.values()].sort((a, b) => a.since - b.since);
   }
 
   /** Everything the admin page shows. Counts as one admin call. */
@@ -120,7 +137,7 @@ export class StatsCore {
       days.push({ day: k.slice(2), usage: this.cache.get(k) ?? { ...empty(), ...((await this.store.get<Usage>(k)) ?? {}) } });
     }
     const nextReset = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate() + 1);
-    return { now, today, estimate: estimate(today), limits: FREE_LIMITS, nextReset, hours, days, live: this.liveRooms(now) };
+    return { now, today, estimate: estimate(today), limits: FREE_LIMITS, nextReset, hours, days, live: await this.liveRooms(now) };
   }
 
   /** Drop hourly records older than two days and daily ones older than 60 days. */

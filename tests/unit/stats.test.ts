@@ -37,9 +37,10 @@ describe('admin stats', () => {
     // 6 connects + 600/20 messages + 3 reports + 1 admin call
     expect(s.estimate.doRequests).toBe(6 + 30 + 3 + 1);
     expect(s.hours.at(-1)!.usage.msgsIn).toBe(600);
-    // persisted: a fresh instance (object evicted) reads the same day
+    // persisted: a fresh instance (object evicted) reads the same day and live rooms
     const again = await new StatsCore(store).stats(t0 + 4000);
     expect(again.today.msgsIn).toBe(600);
+    expect(again.live.map((r) => r.code)).toEqual(['WXYZ']);
     // rooms that stop reporting disappear
     expect((await core.stats(t0 + 10 * 60_000)).live).toEqual([]);
   });

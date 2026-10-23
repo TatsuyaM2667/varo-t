@@ -50,6 +50,7 @@ export class Room implements DurableObject {
   private reported: RoomTraffic = { connects: 0, msgsIn: 0, bytesIn: 0, msgsOut: 0, bytesOut: 0, matches: 0 };
   private reportedSnap = '';
   private timer = 0;
+  private soon = false;
 
   constructor(
     _ctx: DurableObjectState,
@@ -128,6 +129,14 @@ export class Room implements DurableObject {
         }
       });
     if (!this.timer) this.timer = setInterval(() => void this.report(), REPORT_EVERY_MS) as unknown as number;
+    // show new rooms / joins on the admin page soon, without waiting for the minute
+    if (!this.soon) {
+      this.soon = true;
+      setTimeout(() => {
+        this.soon = false;
+        void this.report();
+      }, 3000);
+    }
     server.addEventListener('close', gone);
     server.addEventListener('error', gone);
     return new Response(null, { status: 101, webSocket: client });
